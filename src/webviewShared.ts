@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as manager from './skillsManager';
 import * as settings from './settingsManager';
 import * as memory from './memoryManager';
+import * as git from './gitManager';
+import * as sessionsManager from './sessionsManager';
 import { Scope } from './skillsManager';
 import { CURATED_SKILLS, CATEGORIES, Category } from './data/curatedSkills';
 import { TEMPLATES } from './data/templates';
@@ -22,7 +24,12 @@ type InMsg =
   | { type: 'removeMCP'; name: string; scope: Scope }
   | { type: 'addHook'; event: HookEvent; matcher: string; command: string; scope: Scope }
   | { type: 'removeHook'; event: HookEvent; command: string; scope: Scope }
+  | { type: 'disableHook'; event: HookEvent; command: string; scope: Scope }
+  | { type: 'enableHook'; event: HookEvent; matcher: string; command: string; scope: Scope }
   | { type: 'readMemory'; filepath: string }
+  | { type: 'getGitStatus' }
+  | { type: 'gitCommit'; files: string[]; message: string }
+  | { type: 'getSessions' }
   | { type: 'openSettings'; scope: Scope }
   | { type: 'openCommandsDir'; scope: Scope };
 
@@ -138,8 +145,47 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
       break;
     }
 
+    case 'disableHook': {
+      try {
+        settings.disableHook(msg.event, msg.command, msg.scope, pp);
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'hookResult', ok: false, error: String(e) });
+      }
+      break;
+    }
+
+    case 'enableHook': {
+      try {
+        settings.enableHook(msg.event, msg.matcher, msg.command, msg.scope, pp);
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'hookResult', ok: false, error: String(e) });
+      }
+      break;
+    }
+
     case 'readMemory':
       webview.postMessage({ type: 'memoryContent', filepath: msg.filepath, content: memory.readMemoryFile(msg.filepath) });
+      break;
+
+    case 'getGitStatus': {
+      if (!pp) { webview.postMessage({ type: 'gitStatusData', branch: '', files: [], error: 'No project folder open.' }); break; }
+      git.getStatus(pp).then(status => webview.postMessage({ type: 'gitStatusData', ...status }));
+      break;
+    }
+
+    case 'gitCommit': {
+      if (!pp) { webview.postMessage({ type: 'gitCommitResult', ok: false, output: 'No project folder open.' }); break; }
+      git.commit(pp, msg.files, msg.message).then(result => {
+        webview.postMessage({ type: 'gitCommitResult', ...result });
+        if (result.ok) { git.getStatus(pp).then(status => webview.postMessage({ type: 'gitStatusData', ...status })); }
+      });
+      break;
+    }
+
+    case 'getSessions':
+      webview.postMessage({ type: 'sessionsData', projects: sessionsManager.getSessions() });
       break;
 
     case 'openSettings': {
@@ -179,6 +225,7 @@ export function sendStack(ctx: WebviewContext): void {
       skills: gSkills.length,
       mcps: settings.getActiveMCPs('global'),
       hooks: settings.getActiveHooks('global'),
+      disabledHooks: settings.getDisabledHooks('global'),
     },
     project: {
       available: !!projectPath,
@@ -186,6 +233,7 @@ export function sendStack(ctx: WebviewContext): void {
       skills: pSkills.length,
       mcps: projectPath ? settings.getActiveMCPs('project', projectPath) : [],
       hooks: projectPath ? settings.getActiveHooks('project', projectPath) : [],
+      disabledHooks: projectPath ? settings.getDisabledHooks('project', projectPath) : [],
     },
     memoryFiles: memory.getMemoryFiles(),
     model: settings.getActiveModel(projectPath),
@@ -199,6 +247,7 @@ const S: Record<string, string> = {
   plug:     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 1.5 V4.5"/><path d="M11 1.5 V4.5"/><rect x="3.5" y="4.5" width="9" height="4.5" rx="1"/><path d="M8 9 V12"/><path d="M5.5 12 H10.5 V14"/></svg>`,
   hook:     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2 V8 A3 3 0 0 1 5 8"/><circle cx="11" cy="2" r="1"/></svg>`,
   brain:    `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 3 a2 2 0 0 0 -4 0 a2 2 0 0 0 -1 3.5 a2 2 0 0 0 0 3 a2 2 0 0 0 2 3 a2 2 0 0 0 3 0.5"/><path d="M8 3 a2 2 0 0 1 4 0 a2 2 0 0 1 1 3.5 a2 2 0 0 1 0 3 a2 2 0 0 1 -2 3 a2 2 0 0 1 -3 0.5"/><path d="M8 3 V13"/></svg>`,
+  clock:    `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.5 V8 L10.5 9.5"/></svg>`,
   globe:    `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M2 8 H14"/><path d="M8 2 a8 6 0 0 1 0 12 a8 6 0 0 1 0 -12"/></svg>`,
   folder:   `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4 a1 1 0 0 1 1 -1 H6.5 L8 4.5 H13 a1 1 0 0 1 1 1 V12 a1 1 0 0 1 -1 1 H3 a1 1 0 0 1 -1 -1 Z"/></svg>`,
   search:   `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 L14 14"/></svg>`,
@@ -506,6 +555,8 @@ body { overflow:hidden; display:flex; flex-direction:column; }
     <button class="tab" data-tab="mcp">${S.plug}<span>MCP</span><span class="count" id="cnt-mcp">0</span></button>
     <button class="tab" data-tab="hooks">${S.hook}<span>Hooks</span><span class="count" id="cnt-hooks">0</span></button>
     <button class="tab" data-tab="memory">${S.brain}<span>Memory</span><span class="count" id="cnt-memory">0</span></button>
+    <button class="tab" data-tab="git">${S.branch}<span>Git</span></button>
+    <button class="tab" data-tab="sessions">${S.clock}<span>Sessions</span></button>
   </div>
 
   <div class="panels">
@@ -597,7 +648,7 @@ body { overflow:hidden; display:flex; flex-direction:column; }
           <label class="form-label">Content (Markdown)</label>
           <textarea class="form-textarea" id="create-content"></textarea>
         </div>
-        <button class="btn btn-primary" onclick="createSkill()">${S.plus}<span>Create Skill</span></button>
+        <button class="btn btn-primary" id="create-submit-btn" onclick="createSkill()">${S.plus}<span>Create Skill</span></button>
         <div id="create-status"></div>
       </div>
     </div>
@@ -649,6 +700,8 @@ body { overflow:hidden; display:flex; flex-direction:column; }
         <button class="btn btn-sm" onclick="openSettings()">${S.external}<span>settings.json</span></button>
       </div>
       <div class="list" id="hooks-active-list"></div>
+      <div class="section-h" style="margin-top:22px"><h3>Disabled hooks</h3></div>
+      <div class="list" id="hooks-disabled-list"></div>
       <div class="section-h"><h3>Add from templates</h3></div>
       <div class="list" id="hooks-templates-list"></div>
       <div class="section-h" style="margin-top:22px"><h3>Add custom hook</h3></div>
@@ -690,6 +743,33 @@ body { overflow:hidden; display:flex; flex-direction:column; }
       </div>
     </div>
 
+    <!-- GIT -->
+    <div class="panel" id="panel-git">
+      <div id="git-no-project" style="display:none" class="empty">Open a project folder to use Git.</div>
+      <div id="git-content">
+        <div class="section-h">
+          <h3>Changes <span id="git-branch" class="tag" style="margin-left:8px"></span></h3>
+          <button class="btn btn-sm" onclick="requestGitStatus()">Refresh</button>
+        </div>
+        <div class="list" id="git-files-list"></div>
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label">Commit message</label>
+          <textarea class="form-textarea" id="git-commit-msg" placeholder="Describe the change"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="doGitCommit()">${S.check}<span>Commit</span></button>
+        <div id="git-status"></div>
+      </div>
+    </div>
+
+    <!-- SESSIONS -->
+    <div class="panel" id="panel-sessions">
+      <div class="section-h">
+        <h3>Claude sessions</h3>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">~/.claude/projects/*/*.jsonl</span>
+      </div>
+      <div class="list" id="sessions-list"></div>
+    </div>
+
   </div>
 </div>
 <script>
@@ -710,6 +790,8 @@ let installedProject = [];
 let skillCatFilter = 'all';
 let mcpCatFilter = 'all';
 let activeHooks = [];
+let disabledHooks = [];
+let editingSkillName = null;
 let removePending = {};
 
 // ── Scope ─────────────────────────────────────────────────────
@@ -724,6 +806,7 @@ function setScope(s) {
   renderMCPActive();
   renderMCPCatalog();
   renderHooksActive();
+  renderHooksDisabled();
   updateCounts();
   vscode.postMessage({ type: 'getInstalled', scope: s });
 }
@@ -763,6 +846,8 @@ document.querySelectorAll('.tab').forEach(function(btn) {
     document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
     btn.classList.add('active');
     document.getElementById('panel-' + tabId).classList.add('active');
+    if (tabId === 'git') { requestGitStatus(); }
+    if (tabId === 'sessions') { requestSessions(); }
   });
 });
 
@@ -770,6 +855,7 @@ document.querySelectorAll('.tab').forEach(function(btn) {
 document.querySelectorAll('.subtab').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var sub = btn.dataset.ssub;
+    if (sub === 'create') { resetCreateForm(); }
     document.querySelectorAll('.subtab').forEach(function(t) { t.classList.remove('active'); });
     btn.classList.add('active');
     document.getElementById('skills-browse').style.display    = sub === 'browse'    ? '' : 'none';
@@ -777,6 +863,17 @@ document.querySelectorAll('.subtab').forEach(function(btn) {
     document.getElementById('skills-create').style.display    = sub === 'create'    ? '' : 'none';
   });
 });
+
+function resetCreateForm() {
+  if (!editingSkillName) return;
+  editingSkillName = null;
+  ['create-name','create-title','create-desc','create-content'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  var btn = document.getElementById('create-submit-btn');
+  if (btn) { var sp = btn.querySelector('span'); if (sp) sp.textContent = 'Create Skill'; }
+}
 
 // ── Category chips (skills) ───────────────────────────────────
 document.querySelectorAll('.chip[data-scat]').forEach(function(chip) {
@@ -807,6 +904,7 @@ var TRASH_SVG   = ${JSON.stringify(S.trash)};
 var PLUS_SVG    = ${JSON.stringify(S.plus)};
 var CHECK_SVG   = ${JSON.stringify(S.check)};
 var BRAIN_SVG   = ${JSON.stringify(S.brain)};
+var CLOCK_SVG   = ${JSON.stringify(S.clock)};
 var LIGHT_SVG   = ${JSON.stringify(S.lightning)};
 var EXT_SVG     = ${JSON.stringify(S.external)};
 var CAT_ICONS_MAP = ${JSON.stringify(CAT_ICONS)};
@@ -937,6 +1035,7 @@ function renderInstalledList() {
         '<div class="title"><span class="sname">/' + e(sk.name) + '</span></div>' +
         (meta ? '<div class="desc">' + e(meta.description) + '</div>' : '') +
       '</div>' +
+      '<button class="btn btn-sm" data-action="edit-skill" data-id="' + e(sk.name) + '">Edit</button>' +
       '<button class="btn btn-danger btn-sm" data-action="uninstall" data-id="' + e(sk.name) + '">' + TRASH_SVG + '<span>Remove</span></button>' +
     '</div>';
   }).join('');
@@ -959,7 +1058,27 @@ function createSkill() {
   var cat  = document.getElementById('create-cat')  ? document.getElementById('create-cat').value  : '';
   var content = document.getElementById('create-content') ? document.getElementById('create-content').value.trim() : '';
   if (!name || !content) { showStatus('create-status', 'Name and content are required.', false); return; }
+  if (editingSkillName && editingSkillName !== name) {
+    vscode.postMessage({ type: 'uninstall', skillName: editingSkillName, scope: scope });
+  }
   vscode.postMessage({ type: 'create', name: name, category: cat, content: content, scope: scope });
+}
+
+function editSkill(name) {
+  var arr = scope === 'global' ? installedGlobal : installedProject;
+  var sk = arr.find(function(s) { return s.name === name; });
+  if (!sk) return;
+  editingSkillName = name;
+  document.querySelectorAll('.subtab').forEach(function(t) { t.classList.toggle('active', t.dataset.ssub === 'create'); });
+  document.getElementById('skills-browse').style.display    = 'none';
+  document.getElementById('skills-installed').style.display = 'none';
+  document.getElementById('skills-create').style.display    = '';
+  var nameEl = document.getElementById('create-name'); if (nameEl) nameEl.value = sk.name;
+  var contentEl = document.getElementById('create-content'); if (contentEl) contentEl.value = sk.content;
+  var titleEl = document.getElementById('create-title'); if (titleEl) titleEl.value = '';
+  var descEl = document.getElementById('create-desc'); if (descEl) descEl.value = '';
+  var btn = document.getElementById('create-submit-btn');
+  if (btn) { var sp = btn.querySelector('span'); if (sp) sp.textContent = 'Save Changes'; }
 }
 
 // ── MCP ───────────────────────────────────────────────────────
@@ -1118,6 +1237,7 @@ function renderHooksActive() {
         '</div>' +
         '<div class="desc" style="font-family:var(--mono);margin-top:6px">' + e(cmd80) + '</div>' +
       '</div>' +
+      '<button class="btn btn-sm" onclick="pauseHook(' + i + ')">Pause</button>' +
       '<button class="btn btn-danger btn-sm" id="' + armId + '" onclick="armRemoveHook(' + i + ')">' + TRASH_SVG + '<span>Remove</span></button>' +
     '</div>';
   }).join('');
@@ -1127,6 +1247,39 @@ function armRemoveHook(i) {
   var hk = activeHooks[i];
   if (!hk) return;
   armRemove('arm-hook-' + i, function() { vscode.postMessage({ type: 'removeHook', event: hk.event, command: hk.command, scope: scope }); });
+}
+
+function pauseHook(i) {
+  var hk = activeHooks[i];
+  if (!hk) return;
+  vscode.postMessage({ type: 'disableHook', event: hk.event, command: hk.command, scope: scope });
+}
+
+function renderHooksDisabled() {
+  var el = document.getElementById('hooks-disabled-list');
+  if (!el || !stackData) return;
+  var list = scope === 'global' ? stackData.global.disabledHooks : stackData.project.disabledHooks;
+  disabledHooks = (list || []).slice();
+  if (disabledHooks.length === 0) { el.innerHTML = '<div class="empty">No disabled hooks.</div>'; return; }
+  el.innerHTML = disabledHooks.map(function(hk, i) {
+    var cmd80 = hk.command.slice(0, 80) + (hk.command.length > 80 ? '…' : '');
+    return '<div class="item" style="opacity:0.6">' +
+      '<div class="icn">' + HOOK_SVG + '</div>' +
+      '<div class="body">' +
+        '<div class="meta" style="margin-top:0"><span class="tag">' + e(hk.event) + '</span>' +
+          (hk.matcher && hk.matcher !== '*' ? '<span class="tag">' + e(hk.matcher) + '</span>' : '') +
+        '</div>' +
+        '<div class="desc" style="font-family:var(--mono);margin-top:6px">' + e(cmd80) + '</div>' +
+      '</div>' +
+      '<button class="btn btn-primary btn-sm" onclick="reEnableHook(' + i + ')">' + PLUS_SVG + '<span>Enable</span></button>' +
+    '</div>';
+  }).join('');
+}
+
+function reEnableHook(i) {
+  var hk = disabledHooks[i];
+  if (!hk) return;
+  vscode.postMessage({ type: 'enableHook', event: hk.event, matcher: hk.matcher, command: hk.command, scope: scope });
 }
 
 function renderHookTemplates() {
@@ -1186,6 +1339,72 @@ function viewMemory(filepath, name) {
 }
 
 function closeMemoryViewer() { document.getElementById('memory-viewer').style.display = 'none'; }
+
+// ── Git ───────────────────────────────────────────────────────
+let gitFiles = [];
+
+function requestGitStatus() { vscode.postMessage({ type: 'getGitStatus' }); }
+
+function renderGitStatus(data) {
+  var noProj = document.getElementById('git-no-project');
+  var content = document.getElementById('git-content');
+  if (!noProj || !content) return;
+  if (data.error) {
+    noProj.style.display = '';
+    noProj.textContent = data.error;
+    content.style.display = 'none';
+    return;
+  }
+  noProj.style.display = 'none';
+  content.style.display = '';
+  gitFiles = data.files || [];
+  var branchEl = document.getElementById('git-branch');
+  if (branchEl) branchEl.textContent = data.branch || '';
+  var el = document.getElementById('git-files-list');
+  if (!el) return;
+  if (gitFiles.length === 0) { el.innerHTML = '<div class="empty">No changes.</div>'; return; }
+  el.innerHTML = gitFiles.map(function(f, i) {
+    return '<div class="item">' +
+      '<label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer">' +
+        '<input type="checkbox" class="git-file-check" data-idx="' + i + '" checked>' +
+        '<span class="tag">' + e(f.status || '?') + '</span>' +
+        '<span style="font-family:var(--mono);font-size:11px">' + e(f.path) + '</span>' +
+      '</label>' +
+    '</div>';
+  }).join('');
+}
+
+function doGitCommit() {
+  var msgEl = document.getElementById('git-commit-msg');
+  var msgText = msgEl ? msgEl.value.trim() : '';
+  if (!msgText) { showStatus('git-status', 'Commit message is required.', false); return; }
+  var checked = Array.prototype.slice.call(document.querySelectorAll('.git-file-check:checked'));
+  var files = checked.map(function(cb) { return gitFiles[parseInt(cb.dataset.idx, 10)].path; });
+  if (files.length === 0) { showStatus('git-status', 'Select at least one file.', false); return; }
+  vscode.postMessage({ type: 'gitCommit', files: files, message: msgText });
+}
+
+// ── Sessions ──────────────────────────────────────────────────
+function requestSessions() { vscode.postMessage({ type: 'getSessions' }); }
+
+function renderSessions(projects) {
+  var el = document.getElementById('sessions-list');
+  if (!el) return;
+  if (!projects || projects.length === 0) { el.innerHTML = '<div class="empty">No Claude sessions found.</div>'; return; }
+  el.innerHTML = projects.map(function(p) {
+    var rows = p.sessions.map(function(s) {
+      var d = new Date(s.date);
+      return '<div class="item">' +
+        '<div class="icn">' + CLOCK_SVG + '</div>' +
+        '<div class="body">' +
+          '<div class="title"><span class="sname">' + e(d.toLocaleString()) + '</span></div>' +
+          '<div class="desc">' + s.messageCount + ' messages</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    return '<div class="section-h" style="margin-top:18px"><h3 style="font-family:var(--mono);font-size:12px">' + e(p.projectPath) + '</h3></div>' + rows;
+  }).join('');
+}
 
 // ── Counts ────────────────────────────────────────────────────
 function updateCounts() {
@@ -1247,6 +1466,8 @@ document.addEventListener('click', function(ev) {
     installSkill(btn.dataset.id);
   } else if (action === 'uninstall') {
     armRemoveEl(btn, function() { uninstallSkill(btn.dataset.id); });
+  } else if (action === 'edit-skill') {
+    editSkill(btn.dataset.id);
   } else if (action === 'remove-mcp') {
     armRemoveEl(btn, function() { removeMCP(btn.dataset.id); });
   } else if (action === 'config-mcp') {
@@ -1277,6 +1498,7 @@ window.addEventListener('message', function(ev) {
       renderMCPActive();
       renderMCPCatalog();
       renderHooksActive();
+      renderHooksDisabled();
       renderMemory();
       break;
     case 'createResult':
@@ -1286,6 +1508,9 @@ window.addEventListener('message', function(ev) {
           var el = document.getElementById(id);
           if (el) el.value = '';
         });
+        editingSkillName = null;
+        var submitBtn = document.getElementById('create-submit-btn');
+        if (submitBtn) { var sp2 = submitBtn.querySelector('span'); if (sp2) sp2.textContent = 'Create Skill'; }
       } else {
         showStatus('create-status', msg.error || 'Create failed.', false);
       }
@@ -1309,6 +1534,16 @@ window.addEventListener('message', function(ev) {
       break;
     case 'memoryContent':
       setInner('memory-viewer-content', msg.content || '(empty)');
+      break;
+    case 'gitStatusData':
+      renderGitStatus(msg);
+      break;
+    case 'gitCommitResult':
+      showStatus('git-status', msg.ok ? 'Committed successfully.' : ('Error: ' + (msg.output || '')), msg.ok);
+      if (msg.ok) { var msgEl2 = document.getElementById('git-commit-msg'); if (msgEl2) msgEl2.value = ''; }
+      break;
+    case 'sessionsData':
+      renderSessions(msg.projects);
       break;
     case 'navigateTab':
       if (msg.scope && msg.scope !== scope) {

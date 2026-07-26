@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Hooks: pause/enable a hook without deleting it (disabled hooks are held in a sidecar file, `.claude-deck-disabled-hooks.json`)
+- Skills → Installed: edit an existing command file directly from the panel, including renaming
+- Git tab: view changed files and commit with a message, without leaving the panel
+- Sessions tab: browse past Claude Code sessions per project (date, message count) — read-only
+
 ## [1.1.0]
 
 ### Fixed

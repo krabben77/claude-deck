@@ -143,3 +143,51 @@ export function removeHook(event: HookEvent, command: string, scope: Scope, proj
   if (s.hooks[event]!.length === 0) { delete s.hooks[event]; }
   writeRaw(s, scope, projectPath);
 }
+
+function disabledHooksPath(scope: Scope, projectPath?: string): string {
+  return path.join(path.dirname(settingsPath(scope, projectPath)), '.claude-deck-disabled-hooks.json');
+}
+
+function readDisabledHooks(scope: Scope, projectPath?: string): ActiveHook[] {
+  try {
+    return JSON.parse(fs.readFileSync(disabledHooksPath(scope, projectPath), 'utf-8')) as ActiveHook[];
+  } catch {
+    return [];
+  }
+}
+
+function writeDisabledHooks(hooks: ActiveHook[], scope: Scope, projectPath?: string): void {
+  const p = disabledHooksPath(scope, projectPath);
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+  fs.writeFileSync(p, JSON.stringify(hooks, null, 2) + '\n', 'utf-8');
+}
+
+export function getDisabledHooks(scope: Scope, projectPath?: string): ActiveHook[] {
+  return readDisabledHooks(scope, projectPath);
+}
+
+// Hooks have no native enabled/disabled flag in settings.json, so a disabled hook is
+// moved out of settings.json entirely and held in a sidecar file until re-enabled.
+export function disableHook(event: HookEvent, command: string, scope: Scope, projectPath?: string): void {
+  const s = readRaw(scope, projectPath);
+  if (!s.hooks?.[event]) { return; }
+  const moved: ActiveHook[] = [];
+  s.hooks[event] = s.hooks[event]!.filter(m => {
+    const match = m.hooks.some(h => h.command === command);
+    if (match) { moved.push({ event, matcher: m.matcher ?? '*', command }); }
+    return !match;
+  });
+  if (s.hooks[event]!.length === 0) { delete s.hooks[event]; }
+  writeRaw(s, scope, projectPath);
+  writeDisabledHooks([...readDisabledHooks(scope, projectPath), ...moved], scope, projectPath);
+}
+
+export function enableHook(event: HookEvent, matcher: string, command: string, scope: Scope, projectPath?: string): void {
+  const disabled = readDisabledHooks(scope, projectPath);
+  const idx = disabled.findIndex(h => h.event === event && h.matcher === matcher && h.command === command);
+  if (idx === -1) { return; }
+  disabled.splice(idx, 1);
+  writeDisabledHooks(disabled, scope, projectPath);
+  addHook(event, matcher === '*' ? '' : matcher, command, scope, projectPath);
+}
