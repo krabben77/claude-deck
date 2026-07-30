@@ -191,3 +191,70 @@ export function enableHook(event: HookEvent, matcher: string, command: string, s
   writeDisabledHooks(disabled, scope, projectPath);
   addHook(event, matcher === '*' ? '' : matcher, command, scope, projectPath);
 }
+
+// --- Lock allowlist -------------------------------------------------------
+// Separate from disableHook/enableHook above: those remove a whole hook's
+// registration from settings.json, which is the wrong tool for opening one
+// path temporarily — it would turn off protection for everything the hook
+// covers, not just the one approved write. The allowlist below is a sidecar
+// list of explicitly opened path prefixes that a PreToolUse hook (outside
+// this extension, in the target project's .claude/scripts/) consults before
+// deciding to deny or defer. Default is closed: a path not listed here is
+// locked. Opening is manual and does not expire on its own — close it
+// explicitly, or leave it open across a session at your own judgment.
+
+export interface AllowlistEntry {
+  path: string;
+  openedAt: string;
+}
+
+function allowlistPath(scope: Scope, projectPath?: string): string {
+  return path.join(path.dirname(settingsPath(scope, projectPath)), '.claude-deck-allowlist.json');
+}
+
+function readAllowlist(scope: Scope, projectPath?: string): AllowlistEntry[] {
+  try {
+    return JSON.parse(fs.readFileSync(allowlistPath(scope, projectPath), 'utf-8')) as AllowlistEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function writeAllowlist(entries: AllowlistEntry[], scope: Scope, projectPath?: string): void {
+  const p = allowlistPath(scope, projectPath);
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+  fs.writeFileSync(p, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
+}
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+}
+
+export function getAllowlist(scope: Scope, projectPath?: string): AllowlistEntry[] {
+  return readAllowlist(scope, projectPath);
+}
+
+export function openPath(targetPath: string, scope: Scope, projectPath?: string): void {
+  const entries = readAllowlist(scope, projectPath);
+  const normalized = normalizePath(targetPath);
+  if (entries.some(e => normalizePath(e.path) === normalized)) { return; }
+  entries.push({ path: targetPath, openedAt: new Date().toISOString() });
+  writeAllowlist(entries, scope, projectPath);
+}
+
+export function closePath(targetPath: string, scope: Scope, projectPath?: string): void {
+  const entries = readAllowlist(scope, projectPath);
+  const normalized = normalizePath(targetPath);
+  writeAllowlist(entries.filter(e => normalizePath(e.path) !== normalized), scope, projectPath);
+}
+
+// Prefix match: an open entry for a folder covers everything under it.
+// A closed-by-default path with no matching entry (exact or ancestor) is locked.
+export function isPathAllowed(targetPath: string, scope: Scope, projectPath?: string): boolean {
+  const normalized = normalizePath(targetPath);
+  return readAllowlist(scope, projectPath).some(e => {
+    const openedPrefix = normalizePath(e.path);
+    return normalized === openedPrefix || normalized.startsWith(openedPrefix + '/');
+  });
+}
