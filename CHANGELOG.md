@@ -7,6 +7,7 @@
 - Skills → Installed: edit an existing command file directly from the panel, including renaming
 - Git tab: view changed files and commit with a message, without leaving the panel
 - Sessions tab: browse past Claude Code sessions per project (date, message count) — read-only
+- Chat tab: converse with Claude directly in the panel via headless `claude -p --output-format stream-json`, with streaming responses and multi-turn context (`--continue`/`--resume`); "Continue" button on Sessions rows resumes an old session in Chat
 
 ## [1.1.0]
 

@@ -6,6 +6,7 @@ import * as settings from './settingsManager';
 import * as memory from './memoryManager';
 import * as git from './gitManager';
 import * as sessionsManager from './sessionsManager';
+import * as chatManager from './chatManager';
 import { Scope } from './skillsManager';
 import { CURATED_SKILLS, CATEGORIES, Category } from './data/curatedSkills';
 import { TEMPLATES } from './data/templates';
@@ -30,6 +31,8 @@ type InMsg =
   | { type: 'getGitStatus' }
   | { type: 'gitCommit'; files: string[]; message: string }
   | { type: 'getSessions' }
+  | { type: 'checkChatCli' }
+  | { type: 'sendChatMessage'; text: string; resumeSessionId?: string }
   | { type: 'openSettings'; scope: Scope }
   | { type: 'openCommandsDir'; scope: Scope };
 
@@ -188,6 +191,20 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
       webview.postMessage({ type: 'sessionsData', projects: sessionsManager.getSessions() });
       break;
 
+    case 'checkChatCli':
+      chatManager.checkCli().then(result => webview.postMessage({ type: 'chatCliResult', ...result }));
+      break;
+
+    case 'sendChatMessage': {
+      if (!pp) { webview.postMessage({ type: 'chatError', message: 'Open a project folder to use Chat.' }); break; }
+      chatManager.sendMessage(pp, msg.text, msg.resumeSessionId, {
+        onChunk: text => webview.postMessage({ type: 'chatChunk', text }),
+        onDone: sessionId => webview.postMessage({ type: 'chatDone', sessionId }),
+        onError: message => webview.postMessage({ type: 'chatError', message }),
+      });
+      break;
+    }
+
     case 'openSettings': {
       const sp = settings.settingsPath(msg.scope, pp);
       const dir = path.dirname(sp);
@@ -268,6 +285,7 @@ const S: Record<string, string> = {
   rocket:   `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2 a5 5 0 0 1 3 3 L9.5 9.5 L6.5 6.5 Z"/><path d="M6.5 6.5 L4 9 L7 12 L9.5 9.5"/><path d="M5 11 L3 13"/></svg>`,
   database: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><ellipse cx="8" cy="3.5" rx="5.5" ry="2"/><path d="M2.5 3.5 V8 a5.5 2 0 0 0 11 0 V3.5"/><path d="M2.5 8 V12.5 a5.5 2 0 0 0 11 0 V8"/></svg>`,
   lightning:`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9 1.5 L3 9 H7.5 L7 14.5 L13 7 H8.5 Z"/></svg>`,
+  chat:     `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3.5 a1 1 0 0 1 1 -1 H13 a1 1 0 0 1 1 1 V9.5 a1 1 0 0 1 -1 1 H6 L3 13 V10.5 H3 a1 1 0 0 1 -1 -1 Z"/></svg>`,
 };
 
 const CAT_ICONS: Record<string, string> = {
@@ -557,6 +575,7 @@ body { overflow:hidden; display:flex; flex-direction:column; }
     <button class="tab" data-tab="memory">${S.brain}<span>Memory</span><span class="count" id="cnt-memory">0</span></button>
     <button class="tab" data-tab="git">${S.branch}<span>Git</span></button>
     <button class="tab" data-tab="sessions">${S.clock}<span>Sessions</span></button>
+    <button class="tab" data-tab="chat">${S.chat}<span>Chat</span></button>
   </div>
 
   <div class="panels">
@@ -768,6 +787,21 @@ body { overflow:hidden; display:flex; flex-direction:column; }
         <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">~/.claude/projects/*/*.jsonl</span>
       </div>
       <div class="list" id="sessions-list"></div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="panel" id="panel-chat">
+      <div class="section-h">
+        <h3>Chat</h3>
+        <button class="btn btn-sm" onclick="checkChatCli()">Test connection</button>
+      </div>
+      <div id="chat-cli-status" class="empty">Click "Test connection" to check the claude CLI.</div>
+      <div id="chat-messages" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto"></div>
+      <div class="form-group" style="margin-top:14px">
+        <textarea class="form-textarea" id="chat-input" placeholder="Message Claude…" rows="3"></textarea>
+      </div>
+      <button class="btn btn-primary" id="chat-send-btn" onclick="sendChat()">${S.chat}<span>Send</span></button>
+      <div id="chat-status"></div>
     </div>
 
   </div>
@@ -1394,16 +1428,76 @@ function renderSessions(projects) {
   el.innerHTML = projects.map(function(p) {
     var rows = p.sessions.map(function(s) {
       var d = new Date(s.date);
+      var sid = s.file.replace(/\.jsonl$/, '');
       return '<div class="item">' +
         '<div class="icn">' + CLOCK_SVG + '</div>' +
         '<div class="body">' +
           '<div class="title"><span class="sname">' + e(d.toLocaleString()) + '</span></div>' +
           '<div class="desc">' + s.messageCount + ' messages</div>' +
         '</div>' +
+        '<button class="btn btn-sm" data-action="resume-session" data-id="' + e(sid) + '">Continue</button>' +
       '</div>';
     }).join('');
     return '<div class="section-h" style="margin-top:18px"><h3 style="font-family:var(--mono);font-size:12px">' + e(p.projectPath) + '</h3></div>' + rows;
   }).join('');
+}
+
+// ── Chat ──────────────────────────────────────────────────────
+let chatSessionId = null;
+let chatBusy = false;
+let currentAssistantEl = null;
+
+function checkChatCli() {
+  var el = document.getElementById('chat-cli-status');
+  if (el) el.textContent = 'Checking…';
+  vscode.postMessage({ type: 'checkChatCli' });
+}
+
+function setChatSendEnabled(enabled) {
+  var btn = document.getElementById('chat-send-btn');
+  if (btn) btn.disabled = !enabled;
+}
+
+function appendChatMessage(role, text) {
+  var list = document.getElementById('chat-messages');
+  if (!list) return null;
+  var row = document.createElement('div');
+  row.className = 'item';
+  row.style.flexDirection = 'column';
+  row.style.alignItems = 'flex-start';
+  var label = document.createElement('div');
+  label.className = 'meta';
+  label.innerHTML = '<span class="tag">' + (role === 'user' ? 'You' : 'Claude') + '</span>';
+  var body = document.createElement('div');
+  body.style.whiteSpace = 'pre-wrap';
+  body.style.fontSize = '12.5px';
+  body.style.marginTop = '4px';
+  body.textContent = text;
+  row.appendChild(label);
+  row.appendChild(body);
+  list.appendChild(row);
+  list.scrollTop = list.scrollHeight;
+  return body;
+}
+
+function sendChat() {
+  if (chatBusy) return;
+  var ta = document.getElementById('chat-input');
+  var text = ta ? ta.value.trim() : '';
+  if (!text) return;
+  appendChatMessage('user', text);
+  ta.value = '';
+  chatBusy = true;
+  setChatSendEnabled(false);
+  currentAssistantEl = appendChatMessage('assistant', '');
+  vscode.postMessage({ type: 'sendChatMessage', text: text, resumeSessionId: chatSessionId || undefined });
+}
+
+function resumeSession(id) {
+  chatSessionId = id;
+  var chatTab = document.querySelector('.tab[data-tab="chat"]');
+  if (chatTab) chatTab.click();
+  showStatus('chat-status', 'Resuming session ' + id + ' — send a message to continue.', true);
 }
 
 // ── Counts ────────────────────────────────────────────────────
@@ -1476,6 +1570,8 @@ document.addEventListener('click', function(ev) {
     addMCPFromCatalog(btn.dataset.id);
   } else if (action === 'view-memory') {
     viewMemory(btn.dataset.filepath, btn.dataset.name);
+  } else if (action === 'resume-session') {
+    resumeSession(btn.dataset.id);
   }
 });
 
@@ -1544,6 +1640,30 @@ window.addEventListener('message', function(ev) {
       break;
     case 'sessionsData':
       renderSessions(msg.projects);
+      break;
+    case 'chatCliResult': {
+      var chatEl = document.getElementById('chat-cli-status');
+      if (chatEl) chatEl.textContent = msg.ok ? ('Connected — ' + msg.version) : ('Error: ' + msg.version);
+      break;
+    }
+    case 'chatChunk':
+      if (currentAssistantEl) {
+        currentAssistantEl.textContent += msg.text;
+        var chatList = document.getElementById('chat-messages');
+        if (chatList) chatList.scrollTop = chatList.scrollHeight;
+      }
+      break;
+    case 'chatDone':
+      if (msg.sessionId) chatSessionId = msg.sessionId;
+      chatBusy = false;
+      setChatSendEnabled(true);
+      currentAssistantEl = null;
+      break;
+    case 'chatError':
+      showStatus('chat-status', 'Error: ' + msg.message, false);
+      chatBusy = false;
+      setChatSendEnabled(true);
+      currentAssistantEl = null;
       break;
     case 'navigateTab':
       if (msg.scope && msg.scope !== scope) {
