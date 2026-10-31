@@ -1,0 +1,6 @@
+{
+  "claudeSkills.profileInit.requiredSkills": ["file-style-conventions", "skill-creator"],
+  "claudeSkills.profileInit.recoverRequiredSkillsOnNewBranch": false,
+  "claudeSkills.agentProfiles.autoApplyOnActivate": false,
+  "claudeSkills.branchProfiles.autoApplyOnSwitch": false
+}
