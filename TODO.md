@@ -7,7 +7,7 @@ Bocka av med `[x]` när något är klart.
 
 - [x] **Ångra-funktion**: Ta en kopia av `settings.json` före varje skrivning och lägg till en knapp "Ångra senaste ändring". Gör alla övriga skrivfunktioner tryggare, så den bör komma först.
 - [x] **Permissions-flik**: Visa och redigera `permissions.allow/deny/ask` och `defaultMode` (inklusive auto-läge) per scope.
-- [ ] **Hälsokontroll ("Doctor")**: Kort i Stack-fliken som varnar för trasig JSON i settings, MCP-servrar med saknad kommandofil, hooks som pekar på filer som inte finns och dubbletter mellan global och projekt-scope.
+- [x] **Hälsokontroll ("Doctor")**: Kort i Stack-fliken som varnar för trasig JSON i settings, MCP-servrar med saknad kommandofil, hooks som pekar på filer som inte finns och dubbletter mellan global och projekt-scope.
 - [ ] **Redigera MCP-server och Skill i panelen**: Ändra `args`, `env` och skill-innehåll på plats, med diff-förhandsvisning före skrivning.
 - [ ] **Import/export av stack**: Exportera valda skills, MCP-servrar och hooks som JSON och importera dem i ett annat projekt eller på en annan dator.
 

@@ -302,6 +302,7 @@ export function sendStack(ctx: WebviewContext): void {
       disabledHooks: settings.getDisabledHooks('global'),
       undo: settings.getUndoLabel('global'),
       permissions: settings.getPermissions('global'),
+      health: settings.getHealthIssues('global'),
     },
     project: {
       available: !!projectPath,
@@ -312,6 +313,7 @@ export function sendStack(ctx: WebviewContext): void {
       disabledHooks: projectPath ? settings.getDisabledHooks('project', projectPath) : [],
       undo: projectPath ? settings.getUndoLabel('project', projectPath) : null,
       permissions: projectPath ? settings.getPermissions('project', projectPath) : null,
+      health: projectPath ? settings.getHealthIssues('project', projectPath) : [],
     },
     memoryFiles: memory.getMemoryFiles(),
     model: settings.getActiveModel(projectPath),
@@ -481,6 +483,12 @@ body { overflow:hidden; display:flex; flex-direction:column; }
 .col-row .num { font-size:18px; font-weight:600; color:var(--fg); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .col-row .arrow { color:var(--fg-faint); transition:color .12s,transform .12s; }
 .col-row:hover .arrow { color:var(--fg-mute); transform:translateX(2px); }
+.health-card { margin-top:12px; background:var(--bg-1); border:1px solid var(--line); border-radius:var(--r-lg); padding:12px 16px; font-size:12px; }
+.health-card .h-title { font-weight:600; margin-bottom:6px; }
+.health-card .h-ok { color:var(--fg-dim); }
+.health-card .h-item { padding:3px 0; line-height:1.5; word-break:break-word; }
+.health-card .h-item.error { color:var(--err); }
+.health-card .h-item.warn { color:var(--warn); }
 .empty-col { padding:24px 18px; text-align:center; color:var(--fg-dim); font-size:12px; line-height:1.7; }
 .empty-col code { font-family:var(--mono); background:var(--bg-2); padding:1px 6px; border-radius:3px; font-size:11px; }
 
@@ -1092,6 +1100,13 @@ function goToTab(tabId, scp) {
   document.querySelector('.tab[data-tab="' + tabId + '"]').click();
 }
 
+function renderHealth(issues) {
+  var body = issues.length
+    ? issues.map(function(i) { return '<div class="h-item ' + i.level + '">' + (i.level === 'error' ? '✖ ' : '⚠ ') + e(i.message) + '</div>'; }).join('')
+    : '<div class="h-ok">✔ No problems found in settings, MCP servers or hooks.</div>';
+  return '<div class="health-card"><div class="h-title">Health check</div>' + body + '</div>';
+}
+
 function renderStack() {
   var el = document.getElementById('stack-overview-card');
   if (!el) return;
@@ -1142,7 +1157,7 @@ function renderStack() {
         '<div class="arrow">' + ARROW_SVG + '</div>' +
       '</div>' +
     '</div>' +
-  '</div>';
+  '</div>' + renderHealth(d.health || []);
 
   // Update arch pills to reflect current scope
   var pill1 = document.getElementById('arch-skills-pill');

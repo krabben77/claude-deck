@@ -372,3 +372,85 @@ export function isPathAllowed(targetPath: string, scope: Scope, projectPath?: st
     return normalized === openedPrefix || normalized.startsWith(openedPrefix + '/');
   });
 }
+
+export interface HealthIssue {
+  level: 'error' | 'warn';
+  message: string;
+}
+
+function commandOnPath(cmd: string): boolean {
+  const exts = process.platform === 'win32' ? ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')] : [''];
+  return (process.env.PATH ?? '').split(path.delimiter).some(dir =>
+    !!dir && exts.some(ext => fs.existsSync(path.join(dir, cmd + ext))));
+}
+
+function commandExists(cmd: string, baseDir: string): boolean {
+  if (/[\/]/.test(cmd)) {
+    const p = cmd.startsWith('~') ? path.join(os.homedir(), cmd.slice(1)) : path.resolve(baseDir, cmd);
+    return fs.existsSync(p);
+  }
+  return commandOnPath(cmd);
+}
+
+// Paths a hook command refers to: absolute, ~ or ./ tokens that end in a file extension.
+function hookFilePaths(command: string, projectPath?: string): string[] {
+  const out: string[] = [];
+  for (const m of command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
+    let tok = m[1] ?? m[2] ?? m[3];
+    tok = tok.replace(/\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR/g, projectPath ?? '');
+    if (/:\/\/|[$%*?]/.test(tok) || !/\.\w{1,5}$/.test(tok)) { continue; }
+    if (/^([A-Za-z]:[\/]|\/|~[\/]|\.\.?[\/])/.test(tok)) { out.push(tok); }
+  }
+  return out;
+}
+
+export function getHealthIssues(scope: Scope, projectPath?: string): HealthIssue[] {
+  const issues: HealthIssue[] = [];
+  const file = settingsPath(scope, projectPath);
+  let s: ClaudeSettings;
+  try {
+    s = JSON.parse(fs.readFileSync(file, 'utf-8')) as ClaudeSettings;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      issues.push({ level: 'error', message: `settings.json is not valid JSON: ${(e as Error).message}` });
+    }
+    return issues;
+  }
+
+  const baseDir = scope === 'project' && projectPath ? projectPath : os.homedir();
+  for (const [name, cfg] of Object.entries(s.mcpServers ?? {})) {
+    if (!cfg?.command) {
+      issues.push({ level: 'error', message: `MCP "${name}" has no command.` });
+    } else if (!commandExists(cfg.command, baseDir)) {
+      issues.push({ level: 'error', message: `MCP "${name}": command not found: ${cfg.command}` });
+    }
+  }
+
+  const seen = new Set<string>();
+  for (const h of getActiveHooks(scope, projectPath)) {
+    for (const p of hookFilePaths(h.command, projectPath)) {
+      const resolved = p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : path.resolve(baseDir, p);
+      const key = `${h.event}|${resolved}`;
+      if (!fs.existsSync(resolved) && !seen.has(key)) {
+        seen.add(key);
+        issues.push({ level: 'error', message: `${h.event} hook points to a missing file: ${p}` });
+      }
+    }
+  }
+
+  if (scope === 'project' && projectPath) {
+    const g = readRaw('global');
+    for (const name of Object.keys(s.mcpServers ?? {})) {
+      if (g.mcpServers && name in g.mcpServers) {
+        issues.push({ level: 'warn', message: `MCP "${name}" is defined in both global and project scope.` });
+      }
+    }
+    const globalHooks = new Set(getActiveHooks('global').map(h => `${h.event}|${h.matcher}|${h.command}`));
+    for (const h of getActiveHooks('project', projectPath)) {
+      if (globalHooks.has(`${h.event}|${h.matcher}|${h.command}`)) {
+        issues.push({ level: 'warn', message: `${h.event} hook duplicates a global hook: ${h.command.slice(0, 80)}` });
+      }
+    }
+  }
+  return issues;
+}
