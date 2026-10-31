@@ -27,6 +27,7 @@ type InMsg =
   | { type: 'removeHook'; event: HookEvent; command: string; scope: Scope }
   | { type: 'disableHook'; event: HookEvent; command: string; scope: Scope }
   | { type: 'enableHook'; event: HookEvent; matcher: string; command: string; scope: Scope }
+  | { type: 'undo'; scope: Scope }
   | { type: 'readMemory'; filepath: string }
   | { type: 'getGitStatus' }
   | { type: 'gitCommit'; files: string[]; message: string }
@@ -108,6 +109,7 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'addMCP': {
       try {
+        settings.snapshotForUndo(`Add MCP server ${msg.serverKey}`, msg.scope, pp);
         settings.addMCPServer(msg.serverKey, msg.config, msg.scope, pp);
         webview.postMessage({ type: 'mcpResult', ok: true, name: msg.serverKey });
         sendStack(ctx);
@@ -119,6 +121,7 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'removeMCP': {
       try {
+        settings.snapshotForUndo(`Remove MCP server ${msg.name}`, msg.scope, pp);
         settings.removeMCPServer(msg.name, msg.scope, pp);
         sendStack(ctx);
       } catch (e) {
@@ -129,6 +132,7 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'addHook': {
       try {
+        settings.snapshotForUndo(`Add ${msg.event} hook`, msg.scope, pp);
         settings.addHook(msg.event, msg.matcher, msg.command, msg.scope, pp);
         webview.postMessage({ type: 'hookResult', ok: true });
         sendStack(ctx);
@@ -140,6 +144,7 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'removeHook': {
       try {
+        settings.snapshotForUndo(`Remove ${msg.event} hook`, msg.scope, pp);
         settings.removeHook(msg.event, msg.command, msg.scope, pp);
         sendStack(ctx);
       } catch (e) {
@@ -150,6 +155,7 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'disableHook': {
       try {
+        settings.snapshotForUndo(`Pause ${msg.event} hook`, msg.scope, pp);
         settings.disableHook(msg.event, msg.command, msg.scope, pp);
         sendStack(ctx);
       } catch (e) {
@@ -160,10 +166,22 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
 
     case 'enableHook': {
       try {
+        settings.snapshotForUndo(`Enable ${msg.event} hook`, msg.scope, pp);
         settings.enableHook(msg.event, msg.matcher, msg.command, msg.scope, pp);
         sendStack(ctx);
       } catch (e) {
         webview.postMessage({ type: 'hookResult', ok: false, error: String(e) });
+      }
+      break;
+    }
+
+    case 'undo': {
+      try {
+        const label = settings.undoLastChange(msg.scope, pp);
+        webview.postMessage({ type: 'undoResult', ok: label !== null, label });
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'undoResult', ok: false, error: String(e) });
       }
       break;
     }
@@ -243,6 +261,7 @@ export function sendStack(ctx: WebviewContext): void {
       mcps: settings.getActiveMCPs('global'),
       hooks: settings.getActiveHooks('global'),
       disabledHooks: settings.getDisabledHooks('global'),
+      undo: settings.getUndoLabel('global'),
     },
     project: {
       available: !!projectPath,
@@ -251,6 +270,7 @@ export function sendStack(ctx: WebviewContext): void {
       mcps: projectPath ? settings.getActiveMCPs('project', projectPath) : [],
       hooks: projectPath ? settings.getActiveHooks('project', projectPath) : [],
       disabledHooks: projectPath ? settings.getDisabledHooks('project', projectPath) : [],
+      undo: projectPath ? settings.getUndoLabel('project', projectPath) : null,
     },
     memoryFiles: memory.getMemoryFiles(),
     model: settings.getActiveModel(projectPath),
@@ -373,6 +393,8 @@ body { overflow:hidden; display:flex; flex-direction:column; }
 .hdr-sub { font-size:11px; color:var(--fg-dim); margin-top:1px; }
 .scope { display:flex; background:var(--bg-1); border:1px solid var(--line); border-radius:var(--r); padding:2px; gap:2px; }
 .scope-btn { border:0; background:transparent; color:var(--fg-mute); font:inherit; font-size:11px; font-weight:500; padding:4px 10px; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:color .12s,background .12s; max-width:180px; }
+.undo-btn { border:1px solid var(--line); background:var(--bg-1); color:var(--fg-mute); font:inherit; font-size:11px; font-weight:500; padding:4px 10px; border-radius:4px; cursor:pointer; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.undo-btn:hover { color:var(--fg); }
 .scope-btn .label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .scope-btn:hover:not(.active):not(.disabled) { color:var(--fg); }
 .scope-btn .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
@@ -555,6 +577,7 @@ body { overflow:hidden; display:flex; flex-direction:column; }
       <div class="hdr-title">Claude Deck</div>
       <div class="hdr-sub">Skills · MCP · Hooks · Memory</div>
     </div>
+    <button class="undo-btn" id="undoBtn" style="display:none" onclick="undoLast()"><span id="undoLabel">Undo</span></button>
     <div class="scope">
       <button class="scope-btn global${hasProject ? '' : ' active'}" id="scopeGlobal" onclick="setScope('global')">
         <i class="dot"></i><span class="label">Global</span>
@@ -834,6 +857,7 @@ function setScope(s) {
   document.getElementById('scopeGlobal').classList.toggle('active', s === 'global');
   document.getElementById('scopeProject').classList.toggle('active', s === 'project');
   updateScopeBanners();
+  updateUndo();
   renderStack();
   renderSkillList();
   renderInstalledList();
@@ -844,6 +868,17 @@ function setScope(s) {
   updateCounts();
   vscode.postMessage({ type: 'getInstalled', scope: s });
 }
+
+function updateUndo() {
+  var btn = document.getElementById('undoBtn');
+  if (!btn) return;
+  var d = stackData ? (scope === 'global' ? stackData.global : stackData.project) : null;
+  var label = d && d.undo ? d.undo : '';
+  btn.style.display = label ? '' : 'none';
+  btn.title = label ? 'Undo: ' + label : '';
+  document.getElementById('undoLabel').textContent = label ? 'Undo: ' + label : 'Undo';
+}
+function undoLast() { vscode.postMessage({ type: 'undo', scope: scope }); }
 
 function updateScopeBanners() {
   var defs = [
@@ -1590,6 +1625,7 @@ window.addEventListener('message', function(ev) {
       stackData = msg;
       var mdl = document.getElementById('orchestrator-model');
       if (mdl) mdl.textContent = msg.model || 'default';
+      updateUndo();
       renderStack();
       renderMCPActive();
       renderMCPCatalog();

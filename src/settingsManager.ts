@@ -192,6 +192,56 @@ export function enableHook(event: HookEvent, matcher: string, command: string, s
   addHook(event, matcher === '*' ? '' : matcher, command, scope, projectPath);
 }
 
+// --- Undo ------------------------------------------------------------------
+// One-level undo for the last change made through the panel. Before each mutation
+// the current text of settings.json and the disabled-hooks sidecar is saved to a
+// sidecar next to settings.json; undoLastChange() puts both back exactly as they
+// were (a file that did not exist is deleted again) and drops the snapshot.
+interface UndoSnapshot { label: string; settings: string | null; disabledHooks: string | null; }
+
+function undoPath(scope: Scope, projectPath?: string): string {
+  return path.join(path.dirname(settingsPath(scope, projectPath)), '.claude-deck-undo.json');
+}
+
+function readText(p: string): string | null {
+  try { return fs.readFileSync(p, 'utf-8'); } catch { return null; }
+}
+
+function restoreText(p: string, text: string | null): void {
+  if (text === null) { fs.rmSync(p, { force: true }); return; }
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, text, 'utf-8');
+}
+
+export function snapshotForUndo(label: string, scope: Scope, projectPath?: string): void {
+  const snap: UndoSnapshot = {
+    label,
+    settings: readText(settingsPath(scope, projectPath)),
+    disabledHooks: readText(disabledHooksPath(scope, projectPath)),
+  };
+  const p = undoPath(scope, projectPath);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(snap, null, 2) + '\n', 'utf-8');
+}
+
+export function getUndoLabel(scope: Scope, projectPath?: string): string | null {
+  try {
+    return (JSON.parse(fs.readFileSync(undoPath(scope, projectPath), 'utf-8')) as UndoSnapshot).label;
+  } catch {
+    return null;
+  }
+}
+
+export function undoLastChange(scope: Scope, projectPath?: string): string | null {
+  const up = undoPath(scope, projectPath);
+  let snap: UndoSnapshot;
+  try { snap = JSON.parse(fs.readFileSync(up, 'utf-8')) as UndoSnapshot; } catch { return null; }
+  restoreText(settingsPath(scope, projectPath), snap.settings);
+  restoreText(disabledHooksPath(scope, projectPath), snap.disabledHooks);
+  fs.rmSync(up, { force: true });
+  return snap.label;
+}
+
 // --- Lock allowlist -------------------------------------------------------
 // Separate from disableHook/enableHook above: those remove a whole hook's
 // registration from settings.json, which is the wrong tool for opening one
