@@ -21,4 +21,4 @@ It bundles `hookTemplates.ts`, runs each `block-*` template through `bash -c` wi
 
 When you add or change a safety template, add a dangerous case (expect 2) and a safe case (expect 0) to `verify.mjs`. The built-in bad-JSON case (expect 2, fail closed) runs for every template listed there.
 
-Only the safety templates are covered. Quality, notify and workflow templates are not tested here.
+The script also runs the quality and workflow templates (gofmt, ruff, pytest, tsc, auto-stage, backup-before-edit, log-bash) in throwaway projects, and skips a tool that is not installed. eslint and prettier only get the "ignores unrelated file" check unless they are installed in the repo's node_modules. Notify templates and the Stop-event templates are not tested here.

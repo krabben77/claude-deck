@@ -18,6 +18,13 @@ export interface HookTemplate {
 const stdinGuard = (check: string): string =>
   `node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let i;try{i=JSON.parse(s).tool_input||{}}catch(e){console.error("BLOCKED: cannot parse hook input");process.exit(2)}const b=m=>{console.error("BLOCKED: "+m);process.exit(2)},c=i.command||"",f=(i.file_path||"").split(String.fromCharCode(92)).join("/");${check}})'`;
 
+// Quality/workflow hooks read the same stdin JSON but never block a tool call themselves:
+// they skip silently when the tool is missing, and report problems with exit 2 (stderr
+// reaches Claude after PostToolUse). Newlines are built with fromCharCode(10) because an
+// escaped newline in this template literal would become a real line break in the command.
+const fileHook = (body: string): string =>
+  `node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let i={};try{i=JSON.parse(s).tool_input||{}}catch(e){process.exit(0)}const f=i.file_path||"",c=i.command||"",fs=require("fs"),w=process.platform==="win32",r=(b,a)=>require("child_process").spawnSync(b,w?a.map(x=>JSON.stringify(x)):a,{encoding:"utf8",shell:w}),has=b=>r(w?"where":"which",[b]).status===0,local=b=>fs.existsSync("node_modules/.bin/"+b)||fs.existsSync("node_modules/.bin/"+b+".cmd"),ext=p=>p.test(f),tail=(x,n)=>((x.stdout||"")+(x.stderr||"")).trim().split(String.fromCharCode(10)).slice(-n).join(String.fromCharCode(10)),fail=x=>{console.error(tail(x,30));process.exit(2)};${body}})'`;
+
 export const HOOK_TEMPLATES: HookTemplate[] = [
 
   // ── SAFETY ─────────────────────────────────────────────────────────────
@@ -97,8 +104,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'ESLint after JS/TS edit',
     description: 'Run ESLint on any JS or TS file after Claude edits it.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.(js|ts|jsx|tsx)$ ]] && npx eslint --fix "$FILE" 2>&1 || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.](js|ts|jsx|tsx)$/)&&local("eslint")){const x=r("npx",["--no-install","eslint","--fix",f]);if(x.status!==0)fail(x)}'),
     icon: '✅',
     category: 'quality',
     note: 'Requires ESLint in the project.',
@@ -109,8 +116,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'pytest after Python edit',
     description: 'Run related pytest tests after any Python file is edited.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.py$ ]] && python3 -m pytest --tb=short -q 2>&1 | tail -20 || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.]py$/)){const x=r(w?"python":"python3",["-m","pytest","--tb=short","-q"]);if(x.status!==0&&x.status!==5&&!/No module named pytest/.test(x.stderr||""))fail(x)}'),
     icon: '🧪',
     category: 'quality',
     note: 'Requires pytest installed.',
@@ -121,8 +128,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'TypeScript check after edit',
     description: 'Run tsc --noEmit after any TypeScript file is modified.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.tsx?$ ]] && npx tsc --noEmit 2>&1 | head -30 || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.]tsx?$/)&&fs.existsSync("tsconfig.json")&&local("tsc")){const x=r("npx",["--no-install","tsc","--noEmit"]);if(x.status!==0)fail(x)}'),
     icon: '📐',
     category: 'quality',
   },
@@ -133,7 +140,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Append every Bash command Claude runs to ~/.claude/bash.log with timestamp.',
     event: 'PreToolUse',
     matcher: 'Bash',
-    command: 'bash -c \'echo "[$(date -Iseconds)] $CLAUDE_TOOL_INPUT" >> ~/.claude/bash.log\'',
+    command: fileHook('if(c){const p=require("path").join(require("os").homedir(),".claude","bash.log");fs.appendFileSync(p,"["+new Date().toISOString()+"] "+JSON.stringify(c)+String.fromCharCode(10))}'),
     icon: '📋',
     category: 'quality',
   },
@@ -143,8 +150,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'Prettier after JS/TS/CSS edit',
     description: 'Run Prettier on any JS, TS, or CSS file after Claude edits it.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.(js|ts|jsx|tsx|css|scss|json|md)$ ]] && npx prettier --write "$FILE" 2>&1 || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.](js|ts|jsx|tsx|css|scss|json|md)$/)&&local("prettier"))r("npx",["--no-install","prettier","--write",f])'),
     icon: '🎨',
     category: 'quality',
     note: 'Requires Prettier in the project.',
@@ -155,8 +162,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'gofmt after Go edit',
     description: 'Run gofmt + goimports on any Go file after Claude edits it.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.go$ ]] && gofmt -w "$FILE" && goimports -w "$FILE" 2>/dev/null || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.]go$/)&&has("gofmt")){const x=r("gofmt",["-w",f]);if(x.status!==0)fail(x);if(has("goimports"))r("goimports",["-w",f])}'),
     icon: '🐹',
     category: 'quality',
   },
@@ -166,8 +173,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'Ruff after Python edit',
     description: 'Run ruff format + ruff check --fix on any Python file after Claude edits it.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [[ "$FILE" =~ \\.py$ ]] && ruff format "$FILE" && ruff check --fix "$FILE" 2>&1 || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(ext(/[.]py$/)&&has("ruff")){r("ruff",["format",f]);const x=r("ruff",["check","--fix",f]);if(x.status!==0)fail(x)}'),
     icon: '⚡',
     category: 'quality',
     note: 'Requires ruff installed (pip install ruff).',
@@ -189,20 +196,20 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
 
   {
     id: 'notify-stop',
-    name: 'Desktop notify on completion',
-    description: 'Send a desktop notification when Claude finishes a task.',
+    name: 'Desktop notify on completion (Linux/Mac only)',
+    description: 'Send a desktop notification when Claude finishes a task. Linux and macOS only; does nothing on Windows.',
     event: 'Stop',
     matcher: '',
     command: 'bash -c \'notify-send "Claude Code" "Task complete" --icon=dialog-information 2>/dev/null || osascript -e \'display notification "Task complete" with title "Claude Code"\' 2>/dev/null || true\'',
     icon: '🔔',
     category: 'notify',
-    note: 'Works on Linux (notify-send) and macOS (osascript).',
+    note: 'Linux (notify-send) and macOS (osascript) only. Does nothing on Windows.',
   },
 
   {
     id: 'notify-sound',
-    name: 'Play sound on completion',
-    description: 'Play a system sound when Claude stops.',
+    name: 'Play sound on completion (Linux/Mac only)',
+    description: 'Play a system sound when Claude stops. Linux (paplay) and macOS (afplay) only; does nothing on Windows.',
     event: 'Stop',
     matcher: '',
     command: 'bash -c \'paplay /usr/share/sounds/freedesktop/stereo/complete.oga 2>/dev/null || afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true\'',
@@ -212,8 +219,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
 
   {
     id: 'notify-on-error',
-    name: 'Notify on task error',
-    description: 'Send a desktop notification if Claude stops due to an error or tool failure.',
+    name: 'Notify on task error (Linux/Mac only)',
+    description: 'Send a desktop notification if Claude stops due to an error or tool failure. Linux and macOS only; does nothing on Windows.',
     event: 'Stop',
     matcher: '',
     command: 'bash -c \'[ "$CLAUDE_STOP_REASON" = "error" ] && (notify-send "Claude Code" "Task failed ❌" 2>/dev/null || osascript -e \'display notification "Task failed" with title "Claude Code"\' 2>/dev/null) || true\'',
@@ -228,8 +235,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'Auto-stage edits',
     description: 'Automatically git add any file Claude edits, so you can commit immediately after.',
     event: 'PostToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [ -n "$FILE" ] && git add "$FILE" 2>/dev/null || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(f)r("git",["add",f])'),
     icon: '➕',
     category: 'workflow',
   },
@@ -272,8 +279,8 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     name: 'Backup file before edit',
     description: 'Copy any file to a .bak before Claude edits it — easy manual rollback.',
     event: 'PreToolUse',
-    matcher: 'Edit',
-    command: 'bash -c \'FILE=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\'file_path\',\'\'))" 2>/dev/null); [ -f "$FILE" ] && cp "$FILE" "${FILE}.bak" 2>/dev/null || true\'',
+    matcher: 'Edit|Write',
+    command: fileHook('if(f&&fs.existsSync(f))fs.copyFileSync(f,f+".bak")'),
     icon: '💾',
     category: 'workflow',
   },
