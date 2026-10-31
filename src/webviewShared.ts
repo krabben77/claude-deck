@@ -1281,7 +1281,7 @@ function addCustomMCP() {
   var cmd  = document.getElementById('mcp-cmd')  ? document.getElementById('mcp-cmd').value.trim()  : '';
   var argsStr = document.getElementById('mcp-args') ? document.getElementById('mcp-args').value.trim() : '';
   if (!name || !cmd) { showStatus('mcp-status', 'Server key and command are required.', false); return; }
-  var args = argsStr ? argsStr.split(/\s+/) : [];
+  var args = argsStr ? argsStr.split(/\\s+/) : [];
   vscode.postMessage({ type: 'addMCP', serverKey: name, config: { command: cmd, args: args }, scope: scope });
 }
 
