@@ -12,6 +12,12 @@ export interface HookTemplate {
   note?: string;
 }
 
+// Claude Code passes the tool call as JSON on stdin; only exit code 2 blocks it.
+// Safety hooks fail closed: unparseable input blocks rather than lets the call through.
+// The JS uses double quotes only so it can sit inside single quotes in the shell.
+const stdinGuard = (check: string): string =>
+  `node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let i;try{i=JSON.parse(s).tool_input||{}}catch(e){console.error("BLOCKED: cannot parse hook input");process.exit(2)}const b=m=>{console.error("BLOCKED: "+m);process.exit(2)},c=i.command||"",f=(i.file_path||"").split(String.fromCharCode(92)).join("/");${check}})'`;
+
 export const HOOK_TEMPLATES: HookTemplate[] = [
 
   // ── SAFETY ─────────────────────────────────────────────────────────────
@@ -22,10 +28,10 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Abort any Bash command that contains rm -rf — prevents accidental deletion.',
     event: 'PreToolUse',
     matcher: 'Bash',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | grep -q "rm -rf" && echo "BLOCKED: rm -rf not allowed" && exit 1 || exit 0\'',
+    command: stdinGuard('if(c.includes("rm -rf"))b("rm -rf not allowed")'),
     icon: '🛡️',
     category: 'safety',
-    note: 'Uses exit code 1 to block the tool call.',
+    note: 'Reads the tool call from stdin and exits with code 2, which is what blocks it. Requires Node.js.',
   },
 
   {
@@ -34,7 +40,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Prevent force pushes to main/master to protect shared history.',
     event: 'PreToolUse',
     matcher: 'Bash',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | grep -qE "git push.*--force|git push.*-f" && echo "BLOCKED: force push not allowed" && exit 1 || exit 0\'',
+    command: stdinGuard('if(/git push.* (-f|--force)( |$)/.test(c))b("force push not allowed")'),
     icon: '🚫',
     category: 'safety',
   },
@@ -45,7 +51,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Block any write to .env files to prevent accidental credential overwrites.',
     event: 'PreToolUse',
     matcher: 'Write',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | grep -q "\\.env" && echo "BLOCKED: .env write blocked" && exit 1 || exit 0\'',
+    command: stdinGuard('if(/[.]env/.test(f))b(".env write blocked")'),
     icon: '🔐',
     category: 'safety',
   },
@@ -56,7 +62,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Abort any Bash command containing DROP TABLE to prevent accidental data loss.',
     event: 'PreToolUse',
     matcher: 'Bash',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | grep -qi "drop table" && echo "BLOCKED: DROP TABLE not allowed" && exit 1 || exit 0\'',
+    command: stdinGuard('if(/drop table/i.test(c))b("DROP TABLE not allowed")'),
     icon: '🗑️',
     category: 'safety',
   },
@@ -67,7 +73,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Prevent edits to files that contain "prod" in the path — guards against accidental production config changes.',
     event: 'PreToolUse',
     matcher: 'Edit',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; p=json.load(sys.stdin).get(\'file_path\',\'\'); exit(1 if \'/prod\' in p or \'.prod.\' in p else 0)" && exit 0 || echo "BLOCKED: production file edit blocked" && exit 1\'',
+    command: stdinGuard('if(/[/]prod|[.]prod[.]/.test(f))b("production file edit blocked")'),
     icon: '🚧',
     category: 'safety',
     note: 'Blocks edits to any path containing /prod or .prod.',
@@ -79,7 +85,7 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: 'Scan staged content for patterns that look like API keys or tokens before committing.',
     event: 'PreToolUse',
     matcher: 'Bash',
-    command: 'bash -c \'echo "$CLAUDE_TOOL_INPUT" | grep -q "git commit" && git diff --cached | grep -qE "(sk-|ghp_|AKIA|eyJhbGci|-----BEGIN)" && echo "BLOCKED: possible secret in staged changes" && exit 1 || exit 0\'',
+    command: stdinGuard('if(c.includes("git commit")){let d="";try{d=require("child_process").execSync("git diff --cached",{encoding:"utf8",maxBuffer:50000000})}catch(e){}if(/(sk-|ghp_|AKIA|eyJhbGci|-----BEGIN)/.test(d))b("possible secret in staged changes")}'),
     icon: '🔑',
     category: 'safety',
   },
