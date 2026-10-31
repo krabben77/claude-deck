@@ -33,7 +33,7 @@ export type HookEvent = 'PreToolUse' | 'PostToolUse' | 'Stop' | 'Notification' |
 export interface ClaudeSettings {
   mcpServers?: Record<string, MCPServerConfig>;
   hooks?: Partial<Record<HookEvent, HookMatcher[]>>;
-  permissions?: { allow?: string[]; deny?: string[] };
+  permissions?: { allow?: string[]; deny?: string[]; ask?: string[]; defaultMode?: string; [key: string]: unknown };
   effortLevel?: string;
   [key: string]: unknown;
 }
@@ -190,6 +190,70 @@ export function enableHook(event: HookEvent, matcher: string, command: string, s
   disabled.splice(idx, 1);
   writeDisabledHooks(disabled, scope, projectPath);
   addHook(event, matcher === '*' ? '' : matcher, command, scope, projectPath);
+}
+
+// --- Permissions -----------------------------------------------------------
+export type PermissionList = 'allow' | 'ask' | 'deny';
+export const PERMISSION_LISTS: PermissionList[] = ['allow', 'ask', 'deny'];
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'];
+
+export interface PermissionsInfo {
+  allow: string[];
+  ask: string[];
+  deny: string[];
+  defaultMode: string;
+}
+
+export function getPermissions(scope: Scope, projectPath?: string): PermissionsInfo {
+  const perms = readRaw(scope, projectPath).permissions ?? {};
+  const list = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  return {
+    allow: list(perms.allow),
+    ask: list(perms.ask),
+    deny: list(perms.deny),
+    defaultMode: typeof perms.defaultMode === 'string' ? perms.defaultMode : '',
+  };
+}
+
+function assertList(list: string): asserts list is PermissionList {
+  if (!PERMISSION_LISTS.includes(list as PermissionList)) { throw new Error(`Unknown permission list: ${list}`); }
+}
+
+export function addPermissionRule(list: PermissionList, rule: string, scope: Scope, projectPath?: string): void {
+  assertList(list);
+  const r = rule.trim();
+  if (!r) { throw new Error('Rule is required.'); }
+  const s = readRaw(scope, projectPath);
+  if (!s.permissions) { s.permissions = {}; }
+  const rules = Array.isArray(s.permissions[list]) ? s.permissions[list]! : [];
+  if (!rules.includes(r)) { rules.push(r); }
+  s.permissions[list] = rules;
+  writeRaw(s, scope, projectPath);
+}
+
+export function removePermissionRule(list: PermissionList, rule: string, scope: Scope, projectPath?: string): void {
+  assertList(list);
+  const s = readRaw(scope, projectPath);
+  const rules = s.permissions?.[list];
+  if (!s.permissions || !Array.isArray(rules)) { return; }
+  s.permissions[list] = rules.filter(x => x !== rule);
+  if (s.permissions[list]!.length === 0) { delete s.permissions[list]; }
+  if (Object.keys(s.permissions).length === 0) { delete s.permissions; }
+  writeRaw(s, scope, projectPath);
+}
+
+// An empty mode removes the key so Claude Code falls back to its own default.
+export function setDefaultMode(mode: string, scope: Scope, projectPath?: string): void {
+  if (mode && !PERMISSION_MODES.includes(mode)) { throw new Error(`Unknown permission mode: ${mode}`); }
+  const s = readRaw(scope, projectPath);
+  if (mode) {
+    if (!s.permissions) { s.permissions = {}; }
+    s.permissions.defaultMode = mode;
+  } else if (s.permissions) {
+    delete s.permissions.defaultMode;
+    if (Object.keys(s.permissions).length === 0) { delete s.permissions; }
+  }
+  writeRaw(s, scope, projectPath);
 }
 
 // --- Undo ------------------------------------------------------------------

@@ -27,6 +27,9 @@ type InMsg =
   | { type: 'removeHook'; event: HookEvent; command: string; scope: Scope }
   | { type: 'disableHook'; event: HookEvent; command: string; scope: Scope }
   | { type: 'enableHook'; event: HookEvent; matcher: string; command: string; scope: Scope }
+  | { type: 'addPermission'; list: settings.PermissionList; rule: string; scope: Scope }
+  | { type: 'removePermission'; list: settings.PermissionList; rule: string; scope: Scope }
+  | { type: 'setDefaultMode'; mode: string; scope: Scope }
   | { type: 'undo'; scope: Scope }
   | { type: 'readMemory'; filepath: string }
   | { type: 'getGitStatus' }
@@ -175,6 +178,42 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
       break;
     }
 
+    case 'addPermission': {
+      try {
+        settings.snapshotForUndo(`Add ${msg.list} rule`, msg.scope, pp);
+        settings.addPermissionRule(msg.list, msg.rule, msg.scope, pp);
+        webview.postMessage({ type: 'permResult', ok: true, message: 'Rule added.' });
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'permResult', ok: false, message: String(e) });
+      }
+      break;
+    }
+
+    case 'removePermission': {
+      try {
+        settings.snapshotForUndo(`Remove ${msg.list} rule`, msg.scope, pp);
+        settings.removePermissionRule(msg.list, msg.rule, msg.scope, pp);
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'permResult', ok: false, message: String(e) });
+      }
+      break;
+    }
+
+    case 'setDefaultMode': {
+      try {
+        settings.snapshotForUndo('Change default mode', msg.scope, pp);
+        settings.setDefaultMode(msg.mode, msg.scope, pp);
+        webview.postMessage({ type: 'permResult', ok: true, message: 'Default mode saved.' });
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'permResult', ok: false, message: String(e) });
+        sendStack(ctx);
+      }
+      break;
+    }
+
     case 'undo': {
       try {
         const label = settings.undoLastChange(msg.scope, pp);
@@ -262,6 +301,7 @@ export function sendStack(ctx: WebviewContext): void {
       hooks: settings.getActiveHooks('global'),
       disabledHooks: settings.getDisabledHooks('global'),
       undo: settings.getUndoLabel('global'),
+      permissions: settings.getPermissions('global'),
     },
     project: {
       available: !!projectPath,
@@ -271,6 +311,7 @@ export function sendStack(ctx: WebviewContext): void {
       hooks: projectPath ? settings.getActiveHooks('project', projectPath) : [],
       disabledHooks: projectPath ? settings.getDisabledHooks('project', projectPath) : [],
       undo: projectPath ? settings.getUndoLabel('project', projectPath) : null,
+      permissions: projectPath ? settings.getPermissions('project', projectPath) : null,
     },
     memoryFiles: memory.getMemoryFiles(),
     model: settings.getActiveModel(projectPath),
@@ -595,6 +636,7 @@ body { overflow:hidden; display:flex; flex-direction:column; }
     <button class="tab" data-tab="skills">${S.command}<span>Skills</span><span class="count" id="cnt-skills">0</span></button>
     <button class="tab" data-tab="mcp">${S.plug}<span>MCP</span><span class="count" id="cnt-mcp">0</span></button>
     <button class="tab" data-tab="hooks">${S.hook}<span>Hooks</span><span class="count" id="cnt-hooks">0</span></button>
+    <button class="tab" data-tab="perms">${S.shield}<span>Permissions</span><span class="count" id="cnt-perms">0</span></button>
     <button class="tab" data-tab="memory">${S.brain}<span>Memory</span><span class="count" id="cnt-memory">0</span></button>
     <button class="tab" data-tab="git">${S.branch}<span>Git</span></button>
     <button class="tab" data-tab="sessions">${S.clock}<span>Sessions</span></button>
@@ -769,6 +811,52 @@ body { overflow:hidden; display:flex; flex-direction:column; }
       <div id="hooks-status"></div>
     </div>
 
+    <!-- PERMISSIONS -->
+    <div class="panel" id="panel-perms">
+      <div class="scope-banner global" id="perms-banner">
+        <span id="perms-banner-icon">${S.globe}</span>
+        <span id="perms-banner-label">Global</span>
+        <span class="path" id="perms-banner-path">~/.claude/settings.json</span>
+      </div>
+      <div class="section-h">
+        <h3>Default mode</h3>
+        <button class="btn btn-sm" onclick="openSettings()">${S.external}<span>settings.json</span></button>
+      </div>
+      <div class="form-group">
+        <select class="form-select" id="perm-mode" onchange="changeDefaultMode()">
+          <option value="">(not set)</option>
+          <option value="default">default — ask before most actions</option>
+          <option value="acceptEdits">acceptEdits — auto-accept file edits</option>
+          <option value="plan">plan — read-only planning</option>
+          <option value="auto">auto — classifier decides (global only)</option>
+          <option value="dontAsk">dontAsk — deny anything not allowed</option>
+          <option value="bypassPermissions">bypassPermissions — no prompts (dangerous)</option>
+        </select>
+        <div class="desc" id="perm-mode-note" style="margin-top:6px"></div>
+      </div>
+      <div class="section-h" style="margin-top:22px"><h3>Allow</h3></div>
+      <div class="list" id="perm-list-allow"></div>
+      <div class="section-h" style="margin-top:22px"><h3>Ask</h3></div>
+      <div class="list" id="perm-list-ask"></div>
+      <div class="section-h" style="margin-top:22px"><h3>Deny</h3></div>
+      <div class="list" id="perm-list-deny"></div>
+      <div class="section-h" style="margin-top:22px"><h3>Add rule</h3></div>
+      <div class="form-group">
+        <label class="form-label">List</label>
+        <select class="form-select" id="perm-add-list">
+          <option value="allow">allow</option>
+          <option value="ask">ask</option>
+          <option value="deny">deny</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Rule (e.g. Bash(git status), Read(./src/**), mcp__server__tool)</label>
+        <input class="form-input" id="perm-add-rule" placeholder="Bash(git status)">
+      </div>
+      <button class="btn btn-primary" onclick="addPermission()">${S.plus}<span>Add Rule</span></button>
+      <div id="perm-status"></div>
+    </div>
+
     <!-- MEMORY -->
     <div class="panel" id="panel-memory">
       <div class="section-h">
@@ -839,6 +927,7 @@ const PROJECT_PATH = ${JSON.stringify(projectPath ?? '')};
 const PROJECT_NAME = ${JSON.stringify(projectName ?? 'Project')};
 const GLOBE_SVG = ${JSON.stringify(S.globe)};
 const FOLDER_SVG = ${JSON.stringify(S.folder)};
+const SHIELD_SVG = ${JSON.stringify(S.shield)};
 
 let scope = HAS_PROJECT ? 'project' : 'global';
 let stackData = null;
@@ -865,6 +954,7 @@ function setScope(s) {
   renderMCPCatalog();
   renderHooksActive();
   renderHooksDisabled();
+  renderPermissions();
   updateCounts();
   vscode.postMessage({ type: 'getInstalled', scope: s });
 }
@@ -885,6 +975,7 @@ function updateScopeBanners() {
     { prefix: 'skills', globalPath: '~/.claude/commands/',     projSuffix: '/.claude/commands/'  },
     { prefix: 'mcp',    globalPath: '~/.claude/settings.json', projSuffix: '/.claude/settings.json' },
     { prefix: 'hooks',  globalPath: '~/.claude/settings.json', projSuffix: '/.claude/settings.json' },
+    { prefix: 'perms',  globalPath: '~/.claude/settings.json', projSuffix: '/.claude/settings.json' },
   ];
   defs.forEach(function(d) {
     var banner  = document.getElementById(d.prefix + '-banner');
@@ -1380,6 +1471,53 @@ function addCustomHook() {
   vscode.postMessage({ type: 'addHook', event: event, matcher: matcher || '*', command: command, scope: scope });
 }
 
+// ── Permissions ───────────────────────────────────────────────
+var permRules = { allow: [], ask: [], deny: [] };
+function currentPerms() {
+  if (!stackData) return null;
+  return scope === 'global' ? stackData.global.permissions : stackData.project.permissions;
+}
+function renderPermissions() {
+  var pm = currentPerms();
+  var modeEl = document.getElementById('perm-mode');
+  if (modeEl) modeEl.value = pm ? pm.defaultMode : '';
+  var note = document.getElementById('perm-mode-note');
+  if (note) {
+    var m = pm ? pm.defaultMode : '';
+    note.textContent = m === 'bypassPermissions' ? 'Warning: bypassPermissions skips all permission prompts.'
+      : (m === 'auto' && scope === 'project') ? 'Note: Claude Code ignores auto mode when set in project settings; set it in Global.'
+      : '';
+  }
+  ['allow', 'ask', 'deny'].forEach(function(list) {
+    var el = document.getElementById('perm-list-' + list);
+    if (!el) return;
+    var rules = pm ? pm[list] : [];
+    permRules[list] = rules.slice();
+    if (rules.length === 0) { el.innerHTML = '<div class="empty">No ' + list + ' rules for this scope.</div>'; return; }
+    el.innerHTML = rules.map(function(rule, i) {
+      return '<div class="item">' +
+        '<div class="icn">' + SHIELD_SVG + '</div>' +
+        '<div class="body"><div class="desc" style="font-family:var(--mono);margin-top:0">' + e(rule) + '</div></div>' +
+        '<button class="btn btn-danger btn-sm" id="arm-perm-' + list + '-' + i + '" onclick="armRemovePerm(&quot;' + list + '&quot;,' + i + ')">' + TRASH_SVG + '<span>Remove</span></button>' +
+      '</div>';
+    }).join('');
+  });
+}
+function armRemovePerm(list, i) {
+  var rule = permRules[list][i];
+  if (rule === undefined) return;
+  armRemove('arm-perm-' + list + '-' + i, function() { vscode.postMessage({ type: 'removePermission', list: list, rule: rule, scope: scope }); });
+}
+function addPermission() {
+  var list = document.getElementById('perm-add-list').value;
+  var rule = document.getElementById('perm-add-rule').value.trim();
+  if (!rule) { showStatus('perm-status', 'Rule is required.', false); return; }
+  vscode.postMessage({ type: 'addPermission', list: list, rule: rule, scope: scope });
+}
+function changeDefaultMode() {
+  vscode.postMessage({ type: 'setDefaultMode', mode: document.getElementById('perm-mode').value, scope: scope });
+}
+
 // ── Memory ────────────────────────────────────────────────────
 function renderMemory() {
   var el = document.getElementById('memory-list');
@@ -1545,6 +1683,8 @@ function updateCounts() {
   setInner('cnt-skills', installed.length);
   setInner('cnt-mcp',    mcps.length);
   setInner('cnt-hooks',  hooks.length);
+  var pm = scope === 'global' ? g.permissions : p.permissions;
+  setInner('cnt-perms', pm ? pm.allow.length + pm.ask.length + pm.deny.length : 0);
 }
 
 // ── Utils ─────────────────────────────────────────────────────
@@ -1631,6 +1771,8 @@ window.addEventListener('message', function(ev) {
       renderMCPCatalog();
       renderHooksActive();
       renderHooksDisabled();
+      renderPermissions();
+      updateCounts();
       renderMemory();
       break;
     case 'createResult':
@@ -1663,6 +1805,10 @@ window.addEventListener('message', function(ev) {
       if (msg.ok) {
         ['hook-matcher','hook-cmd'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
       }
+      break;
+    case 'permResult':
+      showStatus('perm-status', msg.message, msg.ok);
+      if (msg.ok) { var pr = document.getElementById('perm-add-rule'); if (pr) pr.value = ''; }
       break;
     case 'memoryContent':
       setInner('memory-viewer-content', msg.content || '(empty)');
