@@ -23,6 +23,8 @@ type InMsg =
   | { type: 'previewTemplate'; category: Category; name: string; title: string; description: string }
   | { type: 'addMCP'; serverKey: string; config: settings.MCPServerConfig; scope: Scope }
   | { type: 'removeMCP'; name: string; scope: Scope }
+  | { type: 'getMCP'; name: string; scope: Scope }
+  | { type: 'updateMCP'; name: string; config: settings.MCPServerConfig; scope: Scope }
   | { type: 'addHook'; event: HookEvent; matcher: string; command: string; scope: Scope }
   | { type: 'removeHook'; event: HookEvent; command: string; scope: Scope }
   | { type: 'disableHook'; event: HookEvent; command: string; scope: Scope }
@@ -129,6 +131,22 @@ export function handleMessage(msg: InMsg, ctx: WebviewContext): void {
         sendStack(ctx);
       } catch (e) {
         webview.postMessage({ type: 'mcpResult', ok: false, error: String(e) });
+      }
+      break;
+    }
+
+    case 'getMCP':
+      webview.postMessage({ type: 'mcpConfig', name: msg.name, scope: msg.scope, config: settings.getMCPConfig(msg.name, msg.scope, pp) });
+      break;
+
+    case 'updateMCP': {
+      try {
+        settings.snapshotForUndo(`Edit MCP server ${msg.name}`, msg.scope, pp);
+        settings.updateMCPServer(msg.name, msg.config, msg.scope, pp);
+        webview.postMessage({ type: 'mcpUpdateResult', ok: true, name: msg.name });
+        sendStack(ctx);
+      } catch (e) {
+        webview.postMessage({ type: 'mcpUpdateResult', ok: false, error: String(e) });
       }
       break;
     }
@@ -489,6 +507,17 @@ body { overflow:hidden; display:flex; flex-direction:column; }
 .health-card .h-item { padding:3px 0; line-height:1.5; word-break:break-word; }
 .health-card .h-item.error { color:var(--err); }
 .health-card .h-item.warn { color:var(--warn); }
+.btn:disabled { opacity:.5; cursor:default; }
+.modal-back { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:flex-start; justify-content:center; padding:5vh 16px; z-index:50; overflow:auto; }
+.modal { background:var(--bg-1); border:1px solid var(--line-2); border-radius:var(--r-lg); width:100%; max-width:720px; padding:16px 18px; }
+.modal-title { font-weight:600; font-size:13px; margin-bottom:10px; }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+.modal-note { font-size:11.5px; color:var(--warn); margin-bottom:8px; line-height:1.5; }
+.diff { margin:0; padding:8px 0; background:var(--bg-input); border:1px solid var(--line); border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; max-height:55vh; overflow:auto; }
+.dl { padding:0 10px; white-space:pre-wrap; word-break:break-all; }
+.dl.add { background:rgba(74,222,128,.12); color:var(--ok); }
+.dl.del { background:rgba(248,113,113,.12); color:var(--err); }
+.dl.gap { color:var(--fg-dim); text-align:center; }
 .empty-col { padding:24px 18px; text-align:center; color:var(--fg-dim); font-size:12px; line-height:1.7; }
 .empty-col code { font-family:var(--mono); background:var(--bg-2); padding:1px 6px; border-radius:3px; font-size:11px; }
 
@@ -925,6 +954,30 @@ body { overflow:hidden; display:flex; flex-direction:column; }
 
   </div>
 </div>
+<div class="modal-back" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-title" id="modal-title"></div>
+    <div id="modal-edit" style="display:none">
+      <div class="form-group"><label class="form-label">Server</label><input class="form-input" id="med-name" disabled></div>
+      <div class="form-group"><label class="form-label">Command</label><input class="form-input" id="med-cmd"></div>
+      <div class="form-group"><label class="form-label">Args (one per line)</label><textarea class="form-textarea" id="med-args" rows="4"></textarea></div>
+      <div class="form-group"><label class="form-label">Env (KEY=VALUE per line)</label><textarea class="form-textarea" id="med-env" rows="4"></textarea></div>
+      <div id="med-status"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()"><span>Cancel</span></button>
+        <button class="btn btn-primary" onclick="reviewMCPEdit()"><span>Review changes</span></button>
+      </div>
+    </div>
+    <div id="modal-diff" style="display:none">
+      <div class="modal-note" id="diff-note"></div>
+      <div class="diff" id="diff-body"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="diffBack()"><span id="diff-back-label">Back</span></button>
+        <button class="btn btn-primary" id="diff-apply" onclick="applyDiff()"><span>Apply</span></button>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
 const vscode = acquireVsCodeApi();
 const SKILLS_DATA = ${JSON.stringify(skills)};
@@ -1102,8 +1155,8 @@ function goToTab(tabId, scp) {
 
 function renderHealth(issues) {
   var body = issues.length
-    ? issues.map(function(i) { return '<div class="h-item ' + i.level + '">' + (i.level === 'error' ? '✖ ' : '⚠ ') + e(i.message) + '</div>'; }).join('')
-    : '<div class="h-ok">✔ No problems found in settings, MCP servers or hooks.</div>';
+    ? issues.map(function(i) { return '<div class="h-item ' + i.level + '">' + (i.level === 'error' ? 'x ' : '! ') + e(i.message) + '</div>'; }).join('')
+    : '<div class="h-ok">No problems found in settings, MCP servers or hooks.</div>';
   return '<div class="health-card"><div class="h-title">Health check</div>' + body + '</div>';
 }
 
@@ -1233,9 +1286,27 @@ function createSkill() {
   var cat  = document.getElementById('create-cat')  ? document.getElementById('create-cat').value  : '';
   var content = document.getElementById('create-content') ? document.getElementById('create-content').value.trim() : '';
   if (!name || !content) { showStatus('create-status', 'Name and content are required.', false); return; }
-  if (editingSkillName && editingSkillName !== name) {
-    vscode.postMessage({ type: 'uninstall', skillName: editingSkillName, scope: scope });
+  var safe = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  if (!/[a-z0-9]/.test(safe)) { showStatus('create-status', 'Name must contain at least one letter or number.', false); return; }
+  if (!editingSkillName) { submitSkill(safe, cat, content, null); return; }
+
+  var arr = scope === 'global' ? installedGlobal : installedProject;
+  var orig = arr.find(function(s) { return s.name === editingSkillName; });
+  var target = arr.find(function(s) { return s.name === safe; });
+  var renameFrom = safe !== editingSkillName ? editingSkillName : null;
+  var notes = [];
+  if (renameFrom) {
+    notes.push('Renames /' + renameFrom + ' to /' + safe + ' (the old file is removed).');
+    if (target) notes.push('A skill named /' + safe + ' already exists and will be overwritten.');
   }
+  var before = (target || orig) ? (target || orig).content.trim() : '';
+  showDiff('Review changes to /' + safe, before, content, notes.join(' '), function() {
+    submitSkill(safe, cat, content, renameFrom);
+  }, null, 'Cancel');
+}
+
+function submitSkill(name, cat, content, renameFrom) {
+  pendingRename = renameFrom ? { name: renameFrom, scope: scope } : null;
   vscode.postMessage({ type: 'create', name: name, category: cat, content: content, scope: scope });
 }
 
@@ -1256,7 +1327,114 @@ function editSkill(name) {
   if (btn) { var sp = btn.querySelector('span'); if (sp) sp.textContent = 'Save Changes'; }
 }
 
+// ── Modal + diff preview ──────────────────────────────────────
+var NL = String.fromCharCode(10);
+var modalApply = null, modalBack = null, mcpEditing = null, pendingRename = null;
+
+function openModal(title, view) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-edit').style.display = view === 'edit' ? '' : 'none';
+  document.getElementById('modal-diff').style.display = view === 'diff' ? '' : 'none';
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+  modalApply = null;
+  modalBack = null;
+}
+
+function splitLines(t) { return t === '' ? [] : t.split(NL); }
+
+function lineDiff(a, b) {
+  var n = a.length, m = b.length, out = [], i = 0, j = 0;
+  if (n * m > 4000000) {
+    a.forEach(function(s) { out.push({ t: '-', s: s }); });
+    b.forEach(function(s) { out.push({ t: '+', s: s }); });
+    return out;
+  }
+  var dp = [];
+  for (var x = 0; x <= n; x++) dp.push(new Array(m + 1).fill(0));
+  for (var x2 = n - 1; x2 >= 0; x2--) {
+    for (var y = m - 1; y >= 0; y--) {
+      dp[x2][y] = a[x2] === b[y] ? dp[x2 + 1][y + 1] + 1 : Math.max(dp[x2 + 1][y], dp[x2][y + 1]);
+    }
+  }
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push({ t: ' ', s: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: '-', s: a[i] }); i++; }
+    else { out.push({ t: '+', s: b[j] }); j++; }
+  }
+  while (i < n) { out.push({ t: '-', s: a[i] }); i++; }
+  while (j < m) { out.push({ t: '+', s: b[j] }); j++; }
+  return out;
+}
+
+function showDiff(title, before, after, note, applyFn, backFn, backLabel) {
+  var ops = lineDiff(splitLines(before), splitLines(after));
+  var changed = ops.some(function(op) { return op.t !== ' '; });
+  var keep = new Array(ops.length).fill(false);
+  ops.forEach(function(op, k) {
+    if (op.t === ' ') return;
+    for (var d = -2; d <= 2; d++) { if (k + d >= 0 && k + d < ops.length) keep[k + d] = true; }
+  });
+  var html = '', skipped = 0;
+  var gap = function(n) { return '<div class="dl gap">… ' + n + ' unchanged lines …</div>'; };
+  ops.forEach(function(op, k) {
+    if (!keep[k]) { skipped++; return; }
+    if (skipped) { html += gap(skipped); skipped = 0; }
+    html += '<div class="dl ' + (op.t === '+' ? 'add' : op.t === '-' ? 'del' : '') + '">' + e(op.t + ' ' + op.s) + '</div>';
+  });
+  if (skipped) html += gap(skipped);
+  if (!changed) html = '<div class="dl gap">No content changes.</div>';
+  document.getElementById('diff-note').textContent = note || '';
+  document.getElementById('diff-body').innerHTML = html;
+  document.getElementById('diff-apply').disabled = !(changed || note);
+  document.getElementById('diff-back-label').textContent = backLabel || 'Cancel';
+  modalApply = applyFn;
+  modalBack = backFn || null;
+  openModal(title, 'diff');
+}
+function applyDiff() { var fn = modalApply; closeModal(); if (fn) fn(); }
+function diffBack() { var fn = modalBack; if (fn) fn(); else closeModal(); }
+
 // ── MCP ───────────────────────────────────────────────────────
+function editMCP(name) { vscode.postMessage({ type: 'getMCP', name: name, scope: scope }); }
+
+function openMCPEdit(name, cfg, mcpScope) {
+  mcpEditing = { name: name, scope: mcpScope, config: cfg };
+  document.getElementById('med-name').value = name;
+  document.getElementById('med-cmd').value = cfg.command || '';
+  document.getElementById('med-args').value = (cfg.args || []).join(NL);
+  document.getElementById('med-env').value = Object.keys(cfg.env || {}).map(function(k) { return k + '=' + cfg.env[k]; }).join(NL);
+  document.getElementById('med-status').innerHTML = '';
+  openModal('Edit MCP server', 'edit');
+}
+
+function readLines(id) {
+  return document.getElementById(id).value.split(NL).map(function(l) { return l.replace(/\\r$/, ''); }).filter(function(l) { return l.trim() !== ''; });
+}
+
+function reviewMCPEdit() {
+  var command = document.getElementById('med-cmd').value.trim();
+  if (!command) { showStatus('med-status', 'Command is required.', false); return; }
+  var args = readLines('med-args');
+  var envLines = readLines('med-env');
+  var env = {};
+  for (var i = 0; i < envLines.length; i++) {
+    var eq = envLines[i].indexOf('=');
+    if (eq < 1) { showStatus('med-status', 'Env entry ' + (i + 1) + ' must be KEY=VALUE.', false); return; }
+    env[envLines[i].slice(0, eq).trim()] = envLines[i].slice(eq + 1);
+  }
+  var ed = mcpEditing;
+  var next = JSON.parse(JSON.stringify(ed.config));
+  next.command = command;
+  if (args.length) next.args = args; else delete next.args;
+  if (Object.keys(env).length) next.env = env; else delete next.env;
+  showDiff('Review changes to ' + ed.name, JSON.stringify(ed.config, null, 2), JSON.stringify(next, null, 2), '', function() {
+    vscode.postMessage({ type: 'updateMCP', name: ed.name, config: { command: command, args: args, env: env }, scope: ed.scope });
+  }, function() { openModal('Edit MCP server', 'edit'); }, 'Back');
+}
+
 function renderMCPActive() {
   var el = document.getElementById('mcp-active-list');
   if (!el || !stackData) return;
@@ -1272,6 +1450,7 @@ function renderMCPActive() {
         '<div class="desc" style="font-family:var(--mono)">' + e(m.command + (argsPreview ? ' ' + argsPreview : '')) + '</div>' +
         ((m.envKeys && m.envKeys.length) ? '<div class="meta">' + m.envKeys.map(function(k) { return '<span class="tag">' + e(k) + '</span>'; }).join('') + '</div>' : '') +
       '</div>' +
+      '<button class="btn btn-sm" data-action="edit-mcp" data-id="' + e(m.name) + '">Edit</button>' +
       '<button class="btn btn-danger btn-sm" data-action="remove-mcp" data-id="' + e(m.name) + '">' + TRASH_SVG + '<span>Remove</span></button>' +
     '</div>';
   }).join('');
@@ -1754,6 +1933,8 @@ document.addEventListener('click', function(ev) {
     editSkill(btn.dataset.id);
   } else if (action === 'remove-mcp') {
     armRemoveEl(btn, function() { removeMCP(btn.dataset.id); });
+  } else if (action === 'edit-mcp') {
+    editMCP(btn.dataset.id);
   } else if (action === 'config-mcp') {
     openMCPConfig(btn.dataset.id);
   } else if (action === 'add-mcp') {
@@ -1790,7 +1971,18 @@ window.addEventListener('message', function(ev) {
       updateCounts();
       renderMemory();
       break;
+    case 'mcpConfig':
+      if (msg.config) openMCPEdit(msg.name, msg.config, msg.scope);
+      else showStatus('mcp-status', 'MCP server not found.', false);
+      break;
+    case 'mcpUpdateResult':
+      showStatus('mcp-status', msg.ok ? 'MCP server updated.' : ('Error: ' + (msg.error || '')), msg.ok);
+      break;
     case 'createResult':
+      if (msg.ok && pendingRename) {
+        vscode.postMessage({ type: 'uninstall', skillName: pendingRename.name, scope: pendingRename.scope });
+      }
+      pendingRename = null;
       if (msg.ok) {
         showStatus('create-status', 'Created /' + (msg.name || '') + ' successfully.', true);
         ['create-name','create-title','create-desc','create-content'].forEach(function(id) {

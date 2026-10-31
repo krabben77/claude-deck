@@ -109,6 +109,28 @@ export function addMCPServer(name: string, config: MCPServerConfig, scope: Scope
   writeRaw(s, scope, projectPath);
 }
 
+export function getMCPConfig(name: string, scope: Scope, projectPath?: string): MCPServerConfig | null {
+  return readRaw(scope, projectPath).mcpServers?.[name] ?? null;
+}
+
+// Updates command/args/env of an existing server and keeps any other fields (type, url, cwd, ...).
+export function updateMCPServer(name: string, config: MCPServerConfig, scope: Scope, projectPath?: string): void {
+  const s = readRaw(scope, projectPath);
+  const existing = s.mcpServers?.[name];
+  if (!s.mcpServers || !existing) { throw new Error(`MCP server "${name}" not found.`); }
+  const command = typeof config.command === 'string' ? config.command.trim() : '';
+  if (!command) { throw new Error('Command is required.'); }
+  const args = config.args ?? [];
+  const env = config.env ?? {};
+  if (!Array.isArray(args) || args.some(a => typeof a !== 'string')) { throw new Error('Args must be a list of strings.'); }
+  if (typeof env !== 'object' || Object.values(env).some(v => typeof v !== 'string')) { throw new Error('Env values must be strings.'); }
+  const next: MCPServerConfig = { ...existing, command };
+  if (args.length) { next.args = args; } else { delete next.args; }
+  if (Object.keys(env).length) { next.env = env; } else { delete next.env; }
+  s.mcpServers[name] = next;
+  writeRaw(s, scope, projectPath);
+}
+
 export function removeMCPServer(name: string, scope: Scope, projectPath?: string): void {
   const s = readRaw(scope, projectPath);
   if (s.mcpServers) { delete s.mcpServers[name]; }
