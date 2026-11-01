@@ -5,6 +5,13 @@ Senast ändrat: 2026-11-01
 Här loggas varje utfört block, så att Niclas kan läsa vad som gjorts hela tiden.
 Nyaste raden överst. Varje rad följer Gjort · Hinder · Nästa steg.
 
+## 2026-11-01 · Dokumentation efter uppdelningen
+
+- **Commit**: `b4f25f8`
+- **Gjort**: Uppdaterade `CLAUDE.md` (fasad, `src/webview/` och mallsträngsfällan gäller varje fil i `script/`) och `README.md` (byggavsnitt, arkitekturdiagram, skill-tabell). Tog bort uppdelningen från "Planerat" i README.
+- **Hinder**: Skillen `webview-template-guard` (`.claude/skills/.../SKILL.md`) säger fortfarande att all JS ligger i `webviewShared.ts`. Ej ändrad, eftersom den inte ingick i det godkända blocket. Skillens kontroll fungerar ändå, eftersom den kör `buildWebviewHtml()`.
+- **Nästa steg**: Du väljer nästa punkt i `TODO.md`.
+
 ## 2026-11-01 · Uppdelning av webviewShared.ts, steg 2 av 2
 
 - **Commit**: `0f479bc`
