@@ -5,6 +5,14 @@ Senast ändrat: 2026-11-01
 Här loggas varje utfört block, så att Niclas kan läsa vad som gjorts hela tiden.
 Nyaste raden överst. Varje rad följer Gjort · Hinder · Nästa steg.
 
+## 2026-11-01 · Block 3: package.json och CHANGELOG
+
+- **Commit**: `c70c2e5`
+- **Gjort**: Pekade `repository`, `bugs` och `homepage` i `package.json` mot `krabben77/claude-deck` och uppdaterade beskrivningen. Fyllde i `CHANGELOG.md` under Unreleased med det som saknades (ångra, Permissions, hälsokontroll, MCP-redigering, hook-fixar), hämtat ur git-historiken.
+- **Hinder**: `publisher` ("Ajax1029") och licensnamn är orörda (väntar på Niclas). Raden "Path allowlist for external lock-hook integration" bygger bara på commit-titeln, inte på att koden är läst.
+- **Verifierat**: `npx tsc --noEmit` och `npm run build` går igenom. `package.json` är giltig JSON.
+- **Nästa steg**: Svar på publisher och licensnamn, sedan val av nästa punkt i `TODO.md`.
+
 ## 2026-11-01 · Block 2: README
 
 - **Commit**: `2b2e39a`
