@@ -76,7 +76,7 @@ npm run watch          # samma, men inkrementellt och icke-minifierat
 npx tsc --noEmit       # typkontroll (det finns ingen testsvit)
 ```
 
-Panelens HTML, CSS och JavaScript genereras som en TypeScript-mallsträng i `src/webviewShared.ts`. Använd aldrig `\'` i den inbäddade JavaScripten, eftersom det blir `'` vid kompilering och bryter strängarna. Använd `&quot;` i `onclick`-attribut. Mer finns i [CLAUDE.md](CLAUDE.md).
+Panelens HTML, CSS och JavaScript genereras som TypeScript-mallsträngar under `src/webview/` (JavaScriptet i `src/webview/script/`, en fil per sektion). `src/webviewShared.ts` är bara en tunn fasad. Använd aldrig `\'` i den inbäddade JavaScripten, eftersom det blir `'` vid kompilering och bryter strängarna. Använd `&quot;` i `onclick`-attribut. Mer finns i [CLAUDE.md](CLAUDE.md).
 
 ---
 
@@ -87,7 +87,8 @@ Två ytor delar en motor: en lätt sidopanel och en full panel.
 ```mermaid
 flowchart LR
   SB[skillsSidebar.ts<br/>räknare i Activity Bar] -->|klick| P[skillsPanel.ts<br/>full webview]
-  P --> W[webviewShared.ts<br/>HTML, CSS, JS och meddelanden]
+  P --> W[webviewShared.ts<br/>fasad]
+  W --> V[src/webview/<br/>messages, styles, markup, script]
   W <-->|postMessage| EXT[Extension host]
   EXT --> SK[skillsManager]
   EXT --> ST[settingsManager]
@@ -167,7 +168,7 @@ Reglerna för flödet ligger i skillen `handoff-notion:handoff`. Där finns ocks
 
 | Skill | Används när |
 |-------|-------------|
-| `webview-template-guard` | `webviewShared.ts` ändrats, eller panelen är tom |
+| `webview-template-guard` | något i `src/webview/` eller `webviewShared.ts` ändrats, eller panelen är tom |
 | `hook-template-verify` | `hookTemplates.ts` ändrats |
 | `vscode-extension-debug` | Panelen eller en flik inte laddar |
 
@@ -182,7 +183,6 @@ Detta finns ännu inte. Se [TODO.md](TODO.md) för status.
 - Plugin-vy för den egna marknaden
 - Bättre chatt: historik, verktygskort, avbryt, modellväljare
 - Hooks för det egna systemet
-- Uppdelning av `webviewShared.ts` i moduler
 
 ---
 
