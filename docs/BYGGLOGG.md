@@ -5,6 +5,15 @@ Senast ändrat: 2026-11-01
 Här loggas varje utfört block, så att Niclas kan läsa vad som gjorts hela tiden.
 Nyaste raden överst. Varje rad följer Gjort · Hinder · Nästa steg.
 
+## 2026-11-01 · Uppdelning av webviewShared.ts, steg 1 av 2
+
+- **Commit**: `a956e89`
+- **Gjort**: Flyttade meddelandehanteringen (`src/webview/messages.ts`), ikoner (`icons.ts`), CSS (`styles.ts`) och HTML-skelettet (`markup.ts`) ut ur `webviewShared.ts`. Filen gick från 2084 till 1154 rader. Fasaden exporterar samma funktioner som förut, så `skillsPanel.ts` är orörd.
+- **Verifierat**: HTML från `buildWebviewHtml()` är byte för byte identisk med före ändringen, både med och utan projekt (md5 `006eb806…` och `d66d5e38…`). `npx tsc --noEmit`, `npm run build` och `webview-template-guard` går igenom.
+- **Ej verifierat**: Klick i panelen i en riktig VS Code-session. Identisk utdata gör det osannolikt att något ändrats, men det är inte provat.
+- **Hinder**: Inga.
+- **Nästa steg**: Steg 2, panelens JavaScript delas upp i `src/webview/script/`.
+
 ## 2026-11-01 · Block 3: package.json och CHANGELOG
 
 - **Commit**: `c70c2e5`
