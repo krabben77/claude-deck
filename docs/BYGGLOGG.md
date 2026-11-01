@@ -5,6 +5,15 @@ Senast ändrat: 2026-11-01
 Här loggas varje utfört block, så att Niclas kan läsa vad som gjorts hela tiden.
 Nyaste raden överst. Varje rad följer Gjort · Hinder · Nästa steg.
 
+## 2026-11-01 · Uppdelning av webviewShared.ts, steg 2 av 2
+
+- **Commit**: `0f479bc`
+- **Gjort**: Delade panelens inbäddade JavaScript i 16 moduler under `src/webview/script/` (core, scope, nav, stack, skills, modal, mcp, hooks, permissions, memory, git, sessions, chat, utils, events, init) plus `index.ts` som sätter ihop dem i ursprunglig ordning. `webviewShared.ts` är nu 57 rader (var 2084). Punkten är bockad i `TODO.md`.
+- **Verifierat**: HTML från `buildWebviewHtml()` är byte för byte identisk med baslinjen, med och utan projekt (md5 `006eb806…` och `d66d5e38…`). `npx tsc --noEmit`, `npm run build` och `webview-template-guard` går igenom.
+- **Ej verifierat**: Klick i panelen i en riktig VS Code-session.
+- **Hinder**: `CLAUDE.md` och README beskriver fortfarande allt som liggande i `webviewShared.ts`. Det är inte ändrat, eftersom det inte ingick i det godkända blocket.
+- **Nästa steg**: Uppdatera `CLAUDE.md` och README:s arkitekturavsnitt (väntar på ok).
+
 ## 2026-11-01 · Uppdelning av webviewShared.ts, steg 1 av 2
 
 - **Commit**: `a956e89`

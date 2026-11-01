@@ -33,7 +33,7 @@ Repot är Niclas eget dashboard för AI-systemet. Claude Code utför det mesta s
 - [ ] **Byt metadata från upstream**: repo-URL, `bugs`, `homepage` och badges i `package.json` och README. Publisher och licensnamn väntar på Niclas besked.
 - [ ] **Ny README** med vanlig text och kodblock: installation, bygg, arkitektur (mermaid) och handoff.
 - [ ] **Ny CHANGELOG** och `docs/ARCHITECTURE.md`.
-- [ ] **Dela upp `webviewShared.ts`** (ca 2000 rader) i moduler, med `webview-template-guard` som kontroll efter varje steg.
+- [x] **Dela upp `webviewShared.ts`** (ca 2000 rader) i moduler, med `webview-template-guard` som kontroll efter varje steg.
 - [ ] **Dokumentera handoff via Notion** i README, utan databas-ID (avgörs senare).
 - [ ] **Kurerat MCP-arkiv**: eget format för Niclas personligt utvalda MCP-servrar.
 - [ ] **Plugin-vy för egen marknad**: lista och aktivera plugins från Niclas egen marknad.
