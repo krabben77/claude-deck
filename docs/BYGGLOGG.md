@@ -5,6 +5,14 @@ Senast ändrat: 2026-11-01
 Här loggas varje utfört block, så att Niclas kan läsa vad som gjorts hela tiden.
 Nyaste raden överst. Varje rad följer Gjort · Hinder · Nästa steg.
 
+## 2026-11-01 · Städning av repot
+
+- **Commit**: `3c498aa`
+- **Gjort**: Tog bort `.vscode/settings.json` (inställningar för en annan extension, `claudeSkills.*`, som inget i repot läser). Städade `.vscodeignore` från tre rader som pekade på filer som inte finns. Lade till `TODO.md` och `docs/**` i `.vscodeignore`.
+- **Verifierat**: `vsce ls` visar att paketet nu bara innehåller `CHANGELOG.md`, `LICENSE`, `README.md`, `package.json`, `dist/extension.js`, `media/activitybar.svg`, `media/icon.png` och fem skärmbilder. `TODO.md` och `docs/` följer inte längre med.
+- **Ej gjort**: Skärmbilderna (ca 450 kB) ligger kvar i paketet, eftersom README visar dem.
+- **Nästa steg**: Du väljer nästa punkt i `TODO.md`.
+
 ## 2026-11-01 · Dokumentation efter uppdelningen
 
 - **Commit**: `b4f25f8`
