@@ -21,10 +21,15 @@ This is a VS Code extension with **two UI surfaces** that share one rendering en
 ### Two surfaces, one engine
 - **`skillsSidebar.ts`** — lightweight Activity Bar sidebar (counts only, click-through to panel). Renders its own minimal HTML inline.
 - **`skillsPanel.ts`** — full webview panel (`ViewColumn.One`). Singleton via `SkillsPanel._instance`.
-- **`webviewShared.ts`** — the entire panel HTML/CSS/JS is generated here as a TypeScript template literal (~1340 lines). Both `handleMessage()` and `buildWebviewHtml()` live here. All panel logic is in this one file.
+- **`webviewShared.ts`** — thin facade (~57 lines). Exports `buildWebviewHtml()` plus `handleMessage()`, `sendInstalled()` and `sendStack()`; the real code lives in `src/webview/`:
+  - `messages.ts` — extension-side message handling and the `InMsg` union
+  - `icons.ts`, `styles.ts` — SVG icons and the panel CSS
+  - `markup.ts` — HTML body (receives `hasProject`, `projectName`, active model and chip HTML)
+  - `script/` — the panel's inline JavaScript, one module per section (`core`, `scope`, `nav`, `stack`, `skills`, `modal`, `mcp`, `hooks`, `permissions`, `memory`, `git`, `sessions`, `chat`, `utils`, `events`, `init`); `script/index.ts` concatenates them in order. Only `core.ts` and `stack.ts` interpolate values from the extension.
+  - Each script module is a TypeScript template literal holding raw JS text, so the pitfall below applies to every file in `script/`.
 
 ### Data flow
-The webview communicates via `postMessage` in both directions. Message types are defined as the `InMsg` union in `webviewShared.ts`. Key outbound messages from the extension:
+The webview communicates via `postMessage` in both directions. Message types are defined as the `InMsg` union in `webview/messages.ts`. Key outbound messages from the extension:
 - `stackData` — full architecture snapshot sent by `sendStack()`
 - `installed` — list of installed skills for a scope, sent by `sendInstalled()`
 
@@ -48,7 +53,7 @@ Everything is scoped to `'global'` (`~/.claude/`) or `'project'` (`<workspace>/.
 - `templates.ts` — Create-tab starting templates
 
 ### Template literal pitfall
-The webview JS is embedded inside a TypeScript template literal. **Never use `\'` inside the embedded JS** — it compiles to `'` and breaks string concatenation. Use `&quot;` for quotes inside HTML `onclick` attributes.
+The webview JS is embedded inside TypeScript template literals (`src/webview/script/*.ts`). **Never use `\'` inside the embedded JS** — it compiles to `'` and breaks string concatenation. Use `&quot;` for quotes inside HTML `onclick` attributes.
 
 ### Icon conversion
 To regenerate `media/icon*.png` from SVG:

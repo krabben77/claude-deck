@@ -3,11 +3,26 @@
 ## [Unreleased]
 
 ### Added
+- Undo: every change the panel makes to `settings.json` is backed up first, with a one-level "undo last change" button
+- Permissions tab: view and edit `allow`, `ask` and `deny` rules and `defaultMode` per scope
+- Health check card in the Stack tab
+- MCP servers can be edited in the panel (args, env), with a diff preview before saving
+- Path allowlist for external lock-hook integration
 - Hooks: pause/enable a hook without deleting it (disabled hooks are held in a sidecar file, `.claude-deck-disabled-hooks.json`)
 - Skills → Installed: edit an existing command file directly from the panel, including renaming
 - Git tab: view changed files and commit with a message, without leaving the panel
 - Sessions tab: browse past Claude Code sessions per project (date, message count) — read-only
 - Chat tab: converse with Claude directly in the panel via headless `claude -p --output-format stream-json`, with streaming responses and multi-turn context (`--continue`/`--resume`); "Continue" button on Sessions rows resumes an old session in Chat
+
+### Fixed
+- Safety hook templates now read the tool call as JSON on stdin and block with exit code 2
+- Quality and workflow hook templates read stdin; notification templates are marked Linux/Mac only
+- Escaped `\s` in the custom MCP args split inside the webview template literal
+- Skills Manager no longer reinstalls skills the user has removed
+
+### Changed
+- Repository metadata (repository, bugs, homepage) points to `krabben77/claude-deck`; package description updated
+- README rewritten; build log added in `docs/BYGGLOGG.md`
 
 ## [1.1.0]
 

@@ -1,18 +1,18 @@
 {
   "name": "claude-deck",
   "displayName": "Claude Deck",
-  "description": "Supercharge Claude Code in one click - install Skills, MCP servers, Hooks, and manage Memory without touching a config file.",
+  "description": "Control panel for Claude Code in VS Code - manage Skills, MCP servers, Hooks, Permissions and Memory without editing config files.",
   "version": "1.1.0",
   "publisher": "Ajax1029",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AjaySingh10/claude-deck"
+    "url": "https://github.com/krabben77/claude-deck"
   },
   "bugs": {
-    "url": "https://github.com/AjaySingh10/claude-deck/issues"
+    "url": "https://github.com/krabben77/claude-deck/issues"
   },
-  "homepage": "https://github.com/AjaySingh10/claude-deck#readme",
+  "homepage": "https://github.com/krabben77/claude-deck#readme",
   "engines": {
     "vscode": "^1.85.0"
   },

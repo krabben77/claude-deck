@@ -6,9 +6,8 @@ esbuild.js
 tsconfig.json
 dist/**/*.map
 *.vsix
-media/option-*.svg
 media/icon.svg
-media/icon1.svg
 CLAUDE.md
-claude_project_architecture.md
 .gitignore
+TODO.md
+docs/**

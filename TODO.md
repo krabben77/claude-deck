@@ -25,3 +25,18 @@ Bocka av med `[x]` när något är klart.
 - [ ] **Profiler/presets**: Spara och växla mellan uppsättningar (t.ex. "Frontend", "Research") som slår på och av skills, MCP och hooks tillsammans.
 - [ ] **Plugin-vy**: Lista installerade plugins och marketplaces, med aktivera/inaktivera via `enabledPlugins`.
 - [ ] **Kostnad och kontext**: Visa uppskattad resident kontext per `CLAUDE.md`, skill-lista och MCP, ungefär som `/context` men i panelen.
+
+## Ta över och höja kvaliteten
+
+Repot är Niclas eget dashboard för AI-systemet. Claude Code utför det mesta som agent, och överlämning sker via Notion (se handoff-flödet). Allt som utförs loggas i `docs/BYGGLOGG.md`.
+
+- [ ] **Byt metadata från upstream**: repo-URL, `bugs`, `homepage` och badges i `package.json` och README. Publisher och licensnamn väntar på Niclas besked.
+- [ ] **Ny README** med vanlig text och kodblock: installation, bygg, arkitektur (mermaid) och handoff.
+- [ ] **Ny CHANGELOG** och `docs/ARCHITECTURE.md`.
+- [x] **Dela upp `webviewShared.ts`** (ca 2000 rader) i moduler, med `webview-template-guard` som kontroll efter varje steg.
+- [ ] **Dokumentera handoff via Notion** i README, utan databas-ID (avgörs senare).
+- [ ] **Kurerat MCP-arkiv**: eget format för Niclas personligt utvalda MCP-servrar.
+- [ ] **Plugin-vy för egen marknad**: lista och aktivera plugins från Niclas egen marknad.
+- [ ] **Marknad för Anthropics officiella skills**.
+- [ ] **Bättre chatt**: sessionshistorik, verktygskort, avbryt och modellväljare.
+- [ ] **Hooks för Niclas system**: öppen punkt, lärs in efterhand.
